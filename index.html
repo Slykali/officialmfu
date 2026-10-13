@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#3d8fe0">
+  <meta name="description" content="Subway Rush 2 — a 3D endless runner. Dodge trains, jump barriers, grab coins and power-ups.">
+  <title>Subway Rush 2</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game"></div>
+
+  <div id="hud" class="hidden">
+    <div class="hud-left">
+      <button id="pauseBtn" class="round-btn" aria-label="Pause" title="Pause (P)">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+      </button>
+      <div id="powers"></div>
+    </div>
+    <div class="hud-right">
+      <div class="pill score-pill"><span id="mult" class="mult">x1</span><span id="score">0</span></div>
+      <div class="pill coin-pill"><span class="coin-icon"></span><span id="coinCount">0</span></div>
+    </div>
+  </div>
+
+  <div id="menu" class="screen">
+    <div class="panel">
+      <h1 class="logo">SUBWAY<br><span>RUSH 2</span></h1>
+      <p class="stats-line">Best <b id="bestMenu">0</b> &nbsp;·&nbsp; <span class="coin-icon small"></span> <b id="bankMenu">0</b></p>
+      <button id="playBtn" class="big-btn">PLAY</button>
+      <div class="help">
+        <div><kbd>←</kbd><kbd>→</kbd> or swipe sideways: change lane</div>
+        <div><kbd>↑</kbd> / <kbd>Space</kbd> or swipe up: jump</div>
+        <div><kbd>↓</kbd> or swipe down: roll</div>
+        <div class="dim">Jump the red &amp; white barriers, roll under the yellow signs, run up ramps onto the trains. <kbd>P</kbd> pause · <kbd>M</kbd> mute</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pauseScreen" class="screen hidden">
+    <div class="panel">
+      <h2>Paused</h2>
+      <button id="resumeBtn" class="big-btn">RESUME</button>
+      <button id="quitBtn" class="small-btn">MAIN MENU</button>
+    </div>
+  </div>
+
+  <div id="over" class="screen hidden">
+    <div class="panel">
+      <h2>Game Over</h2>
+      <p id="overCause" class="cause"></p>
+      <div id="newBest" class="new-best hidden">NEW BEST!</div>
+      <div class="results">
+        <div><span>Score</span><b id="overScore">0</b></div>
+        <div><span>Coins</span><b id="overCoins">0</b></div>
+        <div><span>Distance</span><b id="overDist">0</b></div>
+        <div><span>Best</span><b id="overBest">0</b></div>
+      </div>
+      <button id="againBtn" class="big-btn">PLAY AGAIN</button>
+      <button id="menuBtn" class="small-btn">MAIN MENU</button>
+    </div>
+  </div>
+
+  <div id="countdown" class="hidden">3</div>
+  <div id="toast"></div>
+  <div id="flash"></div>
+  <button id="muteBtn" class="round-btn corner" aria-label="Mute" title="Mute (M)">
+    <svg class="on-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <svg class="off-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 9l6 6M22 9l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  </button>
+  <div id="loading">Loading…</div>
+  <div id="error" class="hidden"></div>
+  <noscript><div id="noscript">Please enable JavaScript to play.</div></noscript>
+
+  <script src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "subway-rush-2",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A 3D endless runner game in the browser",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2019 --outfile=game.js",
+    "dev": "esbuild src/main.js --bundle --format=iife --target=es2019 --outfile=game.js --sourcemap --watch",
+    "serve": "npx serve ."
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  },
+  "type": "module"
+}
