@@ -88,6 +88,15 @@ async function advance(page, n, dt = 1 / 60) {
   }, { n, dt });
 }
 
+// Render one frame now (optionally forcing the runner visible, i.e. ignoring the grace blink).
+async function render(page, runnerVisible = false) {
+  await page.evaluate((rv) => {
+    const g = window.__game;
+    if (rv) g.runner.root.visible = true;
+    (g.__origRender || g.renderer.render.bind(g.renderer))(g.scene, g.camera);
+  }, runnerVisible);
+}
+
 async function shot(page, name) {
   const p = path.join(SHOTS, name + '.png');
   await page.screenshot({ path: p });
@@ -105,4 +114,4 @@ function sim(page) {
   });
 }
 
-module.exports = { pw, serve, launch, openGame, freeze, advance, shot, sim, collect, SHOTS, ROOT, GL_ARGS };
+module.exports = { pw, serve, launch, openGame, freeze, advance, render, shot, sim, collect, SHOTS, ROOT, GL_ARGS };

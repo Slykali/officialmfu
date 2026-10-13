@@ -8,6 +8,9 @@ const VIEWPORTS = {
   android360: { viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, userAgent: H.pw.devices['Pixel 5'].userAgent },
   android640land: { viewport: { width: 640, height: 360 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, userAgent: H.pw.devices['Pixel 5'].userAgent },
   iphoneSE: { ...H.pw.devices['iPhone SE'] },
+  // full-screen sizes from the task (e.g. installed PWA / browser chrome hidden)
+  phone390x844: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, userAgent: H.pw.devices['iPhone 13'].userAgent },
+  phone844x390: { viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, userAgent: H.pw.devices['iPhone 13'].userAgent },
 };
 
 function layoutProbe() {
@@ -83,7 +86,12 @@ function layoutProbe() {
       for (const p of ['magnet', 'multiplier', 'sneakers', 'board']) g.sim._activate(p);
       g.sim.graceT = 999; // survive
     });
-    await H.advance(page, 90);
+    await H.advance(page, 30);
+    await H.render(page, true);
+    await page.waitForTimeout(150);
+    await H.shot(page, `qa/layout_${name}_hud_start`); // guard right behind at run start
+    await H.advance(page, 150);
+    await H.render(page, true);
     await page.waitForTimeout(200);
     results[name].hud = await page.evaluate(layoutProbe);
     await H.shot(page, `qa/layout_${name}_hud`);

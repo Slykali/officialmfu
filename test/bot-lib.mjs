@@ -1,9 +1,20 @@
 // Helpers for test/bot.mjs: sim cloning, state keys, lookahead search, the
 // autoplayer policy and layout dumps. Pure test code - it never edits src/.
-import { Sim } from '../src/sim.js';
-import { LevelGenerator } from '../src/generator.js';
-import { trainFront } from '../src/physics.js';
-import { laneX, PLAYER, TRAIN, RAMP_L, HURDLE, OVERHEAD, MOVING } from '../src/config.js';
+//
+// The gameplay modules are loaded from ../src/ unless BOT_SRC_DIR points at a
+// copy (test/bot.mjs snapshots src/ at start-up so that every worker tests the
+// same code even while src/ is being edited).
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const SRC = process.env.BOT_SRC_DIR
+  ? pathToFileURL(path.resolve(process.env.BOT_SRC_DIR) + path.sep).href
+  : new URL('../src/', import.meta.url).href;
+const { Sim } = await import(SRC + 'sim.js');
+const { LevelGenerator } = await import(SRC + 'generator.js');
+const { trainFront, surfaceHeight, hitBarrier } = await import(SRC + 'physics.js');
+const { laneX, PLAYER, TRAIN, RAMP_L, HURDLE, OVERHEAD, MOVING } = await import(SRC + 'config.js');
+export const SRC_URL = SRC;
 
 export const DT = 1 / 60;
 export const A_NONE = 0;
@@ -302,16 +313,19 @@ function diverseTruncate(sorted, beam) {
 // generated items are always taken into account.
 export class Bot {
   constructor(opt = {}) {
-    this.horizon = opt.horizon || 120;
+    this.horizon = opt.horizon || 150;
     this.every = opt.every || 4;
     this.beam = opt.beam || 60;
     this.resync = opt.resync || 30;
     this.powers = opt.powers || 'avoid'; // avoid | ignore | seek
     this.coins = !!opt.coins;
     this.oracle = opt.oracle || null;
+    this.safeWeight = opt.safeWeight ?? 0.02;
     this.plan = [];
     this.tail = null;
     this.sinceSync = Infinity;
+    this.doom = 0;
+    this.seen = new Set();
     this.stats = { replans: 0, level: {}, predictedDeath: 0, expanded: 0, peak: 0 };
   }
 
@@ -319,16 +333,16 @@ export class Bot {
 
   _opts() {
     const oracle = this.oracle;
-    const H = this.horizon;
+    const w = this.safeWeight;
     const reward = (c) => {
-      let v = -0.004 * Math.abs(c.x) / H * 60; // mild centre preference: more escape options
-      if (oracle) v -= (0.05 * Math.abs(c.x - laneX(oracle.safeAt(c.s + 6)))) / H * 60;
+      let v = -0.001 * Math.abs(c.x); // mild centre preference: more escape options
+      if (oracle && w) v -= w * Math.abs(c.x - laneX(oracle.safeAt(c.s + 6)));
       return v;
     };
     return {
-      horizon: H, every: this.every, beam: this.beam, reward,
-      coinWeight: this.coins ? 0.5 : 0,
-      powerWeight: this.powers === 'seek' ? 30 : this.powers === 'avoid' ? -30 : 0,
+      horizon: this.horizon, every: this.every, beam: this.beam, reward,
+      coinWeight: this.coins ? 0.6 : 0,
+      powerWeight: this.powers === 'seek' ? 40 : this.powers === 'avoid' ? -40 : 0,
     };
   }
 
@@ -364,7 +378,7 @@ export class Bot {
       if (!best || r.depth > best.depth) best = r;
       if (r.ok) { this.stats.level[i] = (this.stats.level[i] || 0) + 1; break; }
     }
-    if (!r.ok) { this.stats.predictedDeath++; r = best; }
+    if (!r.ok) { this.stats.predictedDeath++; r = best; this.doom = 8; }
     this.plan = r.plan.slice();
     while (this.plan.length < this.horizon) this.plan.push(A_NONE);
     this.tail = r.ok ? r.end : null;
@@ -372,11 +386,28 @@ export class Bot {
     this.sinceSync = 0;
   }
 
+  // New things worth re-planning for even though the plan still survives:
+  // power-ups (seek mode) or coins (coin mode) entering the horizon.
+  _novelty(sim) {
+    if (this.powers !== 'seek' && !this.coins) return false;
+    const reach = sim.s + this.horizon * sim.speed / 60;
+    let fresh = false;
+    if (this.powers === 'seek') {
+      for (const p of sim.powers) if (p.s < reach && p.s > sim.s && !this.seen.has(p.id)) { this.seen.add(p.id); fresh = true; }
+    }
+    if (this.coins) {
+      for (const c of sim.coinItems) if (c.s < reach && c.s > sim.s && !this.seen.has(c.id)) { this.seen.add(c.id); fresh = true; }
+    }
+    return fresh;
+  }
+
   // Returns the input for this frame.
   act(sim) {
-    if (!this.tail || this.sinceSync >= this.resync) {
+    if (this.doom > 0) {
+      this.doom--;
+    } else if (!this.tail || this.sinceSync >= this.resync || this._novelty(sim)) {
       while (this.plan.length < this.horizon) this.plan.push(A_NONE);
-      const end = this._verifyFrom(sim);
+      const end = (this.tail && this.sinceSync < this.resync) ? null : this._verifyFrom(sim);
       if (end) { this.tail = end; this.sinceSync = 0; } else this._replan(sim);
     }
     this.sinceSync++;
@@ -399,9 +430,58 @@ function badEvents(c, powers) {
   for (let i = 0; i < ev.length; i++) {
     const t = ev[i].type;
     if (t === 'stumble' || t === 'boardBreak') bad = true;
+    else if (t === 'power' && powers === 'avoid') bad = true;
   }
   ev.length = 0;
   return bad;
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoints and the exhaustive "judge".
+//
+// A checkpoint is a full clone of the real sim plus the generator cursor at
+// that moment. To search further ahead than the real sim had generated, the
+// judge regenerates the level with a fresh LevelGenerator(seed): it is advanced
+// to the same cursor and every item generated after that is injected into the
+// clone (the level is a pure function of the seed, so ids/positions match).
+export function checkpoint(sim, frame) {
+  return { frame, s: sim.s, genCursor: sim.gen.cursor, sim: cloneSim(sim, { coins: true }) };
+}
+
+export function rootFromCheckpoint(cp, seed, until) {
+  const root = cloneClone(cp.sim);
+  const g = new LevelGenerator(seed);
+  g.generate(cp.genCursor);
+  if (g.cursor !== cp.genCursor) throw new Error(`generator replay mismatch ${g.cursor} vs ${cp.genCursor}`);
+  if (until > cp.genCursor) {
+    for (const it of g.generate(until)) {
+      const o = { ...it };
+      if (it.kind === 'train') root.trains.push(o);
+      else if (it.kind === 'coin') root.coinItems.push(o);
+      else if (it.kind === 'power') root.powers.push(o);
+      else root.barriers.push(o);
+    }
+  }
+  return root;
+}
+
+/**
+ * Exhaustive survival search from a checkpoint: inputs allowed every frame,
+ * near-exact state dedup, huge beam. Stumbles and board breaks are allowed
+ * unless strict (strict = "can it be survived with no incident at all").
+ */
+export function judge(cp, seed, untilFrame, opt = {}) {
+  const H = untilFrame - cp.frame;
+  const until = cp.s + (H / 60) * 33 + 80;
+  const root = rootFromCheckpoint(cp, seed, until);
+  const t0 = Date.now();
+  const r = search(root, {
+    horizon: H, every: 1, beam: opt.beam || 30000, fine: opt.fine !== false,
+    allowStumble: !opt.strict, allowBoard: !opt.strict, coinWeight: 0, powerWeight: 0,
+    actions: opt.actions,
+  });
+  return { ok: r.ok, depth: r.depth, horizon: H, fromFrame: cp.frame, fromS: cp.s, peak: r.peak, beam: opt.beam || 30000,
+    truncated: r.peak > (opt.beam || 30000), expanded: r.expanded, ms: Date.now() - t0, plan: r.plan, endS: r.end ? r.end.s : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -434,4 +514,4 @@ export function describeLayout(sim, from, to, oracle) {
   return lines.join('\n');
 }
 
-export { Sim, trainFront, laneX, PLAYER, TRAIN, RAMP_L, HURDLE, OVERHEAD, MOVING };
+export { Sim, LevelGenerator, trainFront, surfaceHeight, hitBarrier, laneX, PLAYER, TRAIN, RAMP_L, HURDLE, OVERHEAD, MOVING };
