@@ -115,7 +115,6 @@ export class Game {
     this.guardGap = 3.4; // the guard starts right behind and falls back
     this.camY = 0;
     this.deathT = 0;
-    this.runStart = this.time;
     this.state = 'playing';
     this.ui.showHud();
     this.audio.startMusic();
@@ -345,6 +344,7 @@ export class Game {
     const sim = this.sim;
     const r = this.runner;
     const root = r.root;
+    if (this.state === 'paused' || this.state === 'countdown') return; // hold the current pose
     const dying = this.state === 'dying' || this.state === 'over';
     root.position.set(sim.x, sim.y, -sim.s);
     const running = this.state === 'playing' || dying;
@@ -433,13 +433,14 @@ export class Game {
   }
 
   _animateGuard(dt) {
+    if (this.state === 'paused' || this.state === 'countdown') return; // freeze in place
     const sim = this.sim;
     const g = this.guard;
     let target = 30;
     if (this.state === 'menu') target = 30;
     else if (this.state === 'dying' || this.state === 'over') target = 1.4;
     else if (sim.stumbleT > 0) target = 3.6;
-    else if (this.time - this.runStart < 1.8) target = 3.4;
+    else if (sim.time < 1.8) target = 3.4; // intro: starts right behind, then falls back
     const rate = target < this.guardGap ? 3 : 0.9;
     this.guardGap += (target - this.guardGap) * Math.min(1, dt * rate);
     const gs = sim.s - this.guardGap;
@@ -448,7 +449,7 @@ export class Game {
     g.root.visible = this.guardGap < 14 && this.state !== 'menu';
     g.root.position.set(gx, g.root.position.y + (gy - g.root.position.y) * Math.min(1, dt * 10), -gs);
     const moving = this.state === 'playing' || this.guardGap - target > 0.05;
-    if (moving && this.state !== 'paused' && this.state !== 'countdown') {
+    if (moving) {
       this.guardPhase = (this.guardPhase || 0) + dt * 14;
       const p = Math.sin(this.guardPhase);
       g.legs[0].rotation.x = p * 0.9;

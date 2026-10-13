@@ -36,7 +36,7 @@ export class LevelGenerator {
     this.rng = mulberry32(seed);
     this.nextId = 1;
     this.cursor = FIRST_ROW;
-    this.prevRow = 0;
+    this.prevRow = FIRST_ROW - 6; // the intro coin run covers the stretch before the first row
     this.safe = 1;
     this.trainFree = [0, 0, 0]; // track position where each lane's trains end
     this.objFree = [0, 0, 0]; // earliest position for the next object in a lane
@@ -50,7 +50,8 @@ export class LevelGenerator {
     const out = [];
     if (!this.started) {
       this.started = true;
-      for (let s = 18; s < FIRST_ROW - 6; s += COIN_SPACING) this._coin(out, 1, s, 1.0);
+      // stop short of where the first row could place a ramp
+      for (let s = 18; s < FIRST_ROW - RAMP_L - 2; s += COIN_SPACING) this._coin(out, 1, s, 1.0);
     }
     while (this.cursor < until) {
       this._row(this.cursor, out);

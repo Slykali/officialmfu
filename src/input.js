@@ -36,7 +36,11 @@ export class Input {
     target.addEventListener('pointerup', end);
     target.addEventListener('pointercancel', () => { this.start = null; });
     // stop the page from scrolling or zooming while playing
-    target.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    target.addEventListener('touchmove', (e) => {
+      // menus may need to scroll on short screens
+      if (e.target instanceof Element && e.target.closest('.panel')) return;
+      e.preventDefault();
+    }, { passive: false });
     target.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -54,6 +58,8 @@ export class Input {
   _key(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key;
+    // let a keyboard-focused button handle its own Enter/Space
+    if ((k === 'Enter' || k === ' ') && e.target instanceof HTMLButtonElement) return;
     // ignore auto-repeat so holding a key doesn't fire a stream of moves
     if (e.repeat) {
       if (k.startsWith('Arrow') || k === ' ') e.preventDefault();

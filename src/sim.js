@@ -76,6 +76,7 @@ export class Sim {
   jump() {
     if (!this.alive) return;
     this.jumpBuf = JUMP_BUFFER;
+    this.rollQueued = false; // the latest input wins
   }
 
   down() {
@@ -224,7 +225,7 @@ export class Sim {
       const ds = c.s - this.s;
       if (ds > MAGNET_RANGE + 2) continue;
       let take = false;
-      if (magnet && ds < MAGNET_RANGE && ds > -3) {
+      if ((magnet || c.magnet) && ds < MAGNET_RANGE && ds > -3) {
         c.magnet = true;
         take = ds < 1.2;
       } else if (Math.abs(ds) < 0.9 && Math.abs(laneX(c.lane) - this.x) < 0.95 && Math.abs(c.y - cy) < 1.35) {

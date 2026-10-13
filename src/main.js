@@ -6,7 +6,7 @@ import { Audio } from './audio.js';
 function webglAvailable() {
   try {
     const c = document.createElement('canvas');
-    return !!(window.WebGLRenderingContext && (c.getContext('webgl2') || c.getContext('webgl')));
+    return !!(window.WebGL2RenderingContext && c.getContext('webgl2'));
   } catch (e) {
     return false;
   }
@@ -21,7 +21,7 @@ function fail(msg) {
 
 function boot() {
   if (!webglAvailable()) {
-    fail('Sorry, this game needs WebGL, which your browser or device does not support.');
+    fail('Sorry, this game needs WebGL 2, which your browser or device does not support. Try an up-to-date Chrome, Firefox, Safari or Edge.');
     return;
   }
   const audio = new Audio();
