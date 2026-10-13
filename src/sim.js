@@ -50,6 +50,8 @@ export class Sim {
     this.coinItems = [];
     this.powers = [];
     this.events = [];
+    // Items created and dropped since the last frame. The renderer drains both
+    // arrays every frame; any other consumer must empty them too.
     this.added = [];
     this.removed = [];
     this.nextSkyId = -1;
@@ -193,8 +195,9 @@ export class Sim {
         this.rollQueued = false;
         this.events.push({ type: 'jump', super: this.power.sneakers > 0 });
       }
+      // exact integration, so jump height and air time don't depend on the frame rate
+      this.y += this.vy * h - 0.5 * GRAVITY * h * h;
       this.vy -= GRAVITY * h;
-      this.y += this.vy * h;
       if (this.y <= ground) {
         if (!this.grounded) this.events.push({ type: 'land', hard: this.vy < -20 });
         this.y = ground;

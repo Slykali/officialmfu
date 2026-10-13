@@ -65,9 +65,13 @@ Your best score, coins, unlocked characters and chosen character are saved in th
 
 ```sh
 npm install
-npm run build   # bundles src/ into game.js
-npm run dev     # rebuilds on change, with source maps
+npm run build      # bundles src/ into game.js
+npm run dev        # rebuilds on change, with source maps
+npm test           # mission checks + a bot that plays dozens of levels (~4 min)
+npm run test:full  # the same with hundreds of levels and every variant (~2 h)
 ```
+
+The bot (`test/bot.mjs`) plays the headless simulation with lookahead search and only the normal controls. Any death it can't explain as its own mistake is re-searched exhaustively and reported as a game bug. It also scans thousands of generated levels for broken safe paths, overlapping items and coins that can't be reached. Browser tests for layout, controls and game flow live in `test/e2e/` (run each with `node test/e2e/<name>.cjs`).
 
 The code lives in `src/`:
 
@@ -78,7 +82,7 @@ The code lives in `src/`:
 - `models.js`, `world.js`, `textures.js`: procedurally built 3D models, scenery and textures
 - `characters.js`: the playable characters, their looks and prices
 - `maps.js`: map themes (sky, light, ground, buildings, props)
-- `missions.js`: daily mission picking, progress and rewards (tests: `node test/missions.mjs`)
+- `missions.js`: daily mission picking, progress and rewards
 - `ui.js`, `input.js`, `audio.js`: HUD and menus, controls, synthesised sound
 
 Commit the rebuilt `game.js` along with any changes to `src/` so the game stays playable straight from the repository.

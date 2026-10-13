@@ -284,8 +284,12 @@ export function makeTrain(t) {
     const faceFar = M.end;
     const side = M.sides[(t.id + i) % 3];
     const bodyM = [side, side, M.roof, M.under, faceNear, faceFar];
-    const bodyMesh = new THREE.Mesh(box(2.3, 3.0, L - 0.5), bodyM);
-    bodyMesh.position.set(0, 0.55 + 1.5, zc);
+    // cars leave a small gap between each other, but the ends of the train sit
+    // exactly on its collision box so a crash happens when it visibly touches
+    const near = i === 0 ? 0 : 0.25;
+    const far = i === t.cars - 1 ? 0 : 0.25;
+    const bodyMesh = new THREE.Mesh(box(2.3, 3.0, L - near - far), bodyM);
+    bodyMesh.position.set(0, 0.55 + 1.5, zc + (near - far) / 2);
     bodyMesh.castShadow = true;
     bodyMesh.receiveShadow = true;
     g.add(bodyMesh);

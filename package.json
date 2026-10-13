@@ -6,7 +6,9 @@
   "scripts": {
     "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2019 --outfile=game.js",
     "dev": "esbuild src/main.js --bundle --format=iife --target=es2019 --outfile=game.js --sourcemap --watch",
-    "serve": "npx serve ."
+    "serve": "npx serve .",
+    "test": "node test/missions.mjs && node test/bot.mjs",
+    "test:full": "node test/missions.mjs && node test/bot.mjs --full"
   },
   "dependencies": {
     "three": "0.170.0"

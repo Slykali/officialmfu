@@ -7,7 +7,7 @@
 // previous row. Following the safe lane is therefore always survivable, which
 // guarantees every generated level can be beaten.
 import {
-  LANES, TRAIN, RAMP_L, MOVING, POWER_TYPES, speedAt, laneX,
+  LANES, TRAIN, RAMP_L, MOVING, POWER_TYPES, speedAt, laneX, GRAVITY, PLAYER,
 } from './config.js';
 import { surfaceHeight } from './physics.js';
 
@@ -203,7 +203,14 @@ export class LevelGenerator {
     const start = sPrev + (shifted ? 8 : 6);
     const end = s - (safeKind === 'hurdle' ? 6 : safeKind === 'overhead' ? 4 : 3);
     for (let cs = start; cs <= end; cs += COIN_SPACING) {
-      const h = surfaceHeight(this.recentTrains, laneX(lane), cs, 0.01, 0.01, 0);
+      let h = surfaceHeight(this.recentTrains, laneX(lane), cs, 0.01, 0.01, 0);
+      // just past a roof end, follow the arc the runner falls along instead of dropping straight down
+      for (const t of this.recentTrains) {
+        const d = cs - (t.s + t.len);
+        if (t.lane !== lane || d < 0 || d > 14) continue;
+        const tt = Math.max(0, d - PLAYER.halfD) / speedAt(cs);
+        h = Math.max(h, TRAIN.height - 0.5 * GRAVITY * tt * tt);
+      }
       this._coin(out, lane, cs, h + 1.0);
     }
   }

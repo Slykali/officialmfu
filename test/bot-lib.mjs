@@ -13,7 +13,7 @@ const SRC = process.env.BOT_SRC_DIR
 const { Sim } = await import(SRC + 'sim.js');
 const { LevelGenerator } = await import(SRC + 'generator.js');
 const { trainFront, surfaceHeight, hitBarrier } = await import(SRC + 'physics.js');
-const { laneX, PLAYER, TRAIN, RAMP_L, HURDLE, OVERHEAD, MOVING } = await import(SRC + 'config.js');
+const { laneX, PLAYER, TRAIN, RAMP_L, HURDLE, OVERHEAD, MOVING, GRAVITY, FAST_FALL_V, speedAt } = await import(SRC + 'config.js');
 export const SRC_URL = SRC;
 
 export const DT = 1 / 60;
@@ -629,12 +629,26 @@ export function staticScan(seed, until) {
         else if (it.y < top) add(`${it.kind}-inside-train`, { lane: L, item: it.id, s: it.s, y: it.y, top, train: t.id });
       }
       if (it.kind === 'coin') {
-        // ground-level coin right after a roof end: a runner leaving the roof
-        // is still ~3.6 up there and cannot reach it
+        // Low coin right after a roof end. A runner following the trail leaves
+        // the roof at e + halfD and must be within 0.9 m of the coin with its
+        // centre within 1.35 m of the coin height. Optimistic model: fast-fall
+        // (down) pressed the instant it leaves the roof, and rolling (lowest
+        // centre). If even that cannot get low enough in time the coin cannot
+        // be collected from the trail; if only a plain fall cannot, the coin
+        // needs a well-timed fast-fall.
         for (const t of ts) {
           if (t.moving) continue;
           const e = t.s + t.len;
-          if (it.s >= e && it.s < e + 2.0 && it.y < 2.0) add('coin-just-below-roof-end', { lane: L, item: it.id, s: +it.s.toFixed(2), y: it.y, after: +(it.s - e).toFixed(2), train: t.id });
+          const d = it.s - e;
+          if (d < 0 || d > 6 || it.y > TRAIN.height) continue;
+          const T = Math.max(0, it.s + 0.9 - (e + PLAYER.halfD)) / speedAt(it.s);
+          const dropFast = FAST_FALL_V * T + 0.5 * GRAVITY * T * T;
+          const dropPlain = 0.5 * GRAVITY * T * T;
+          const needRoll = TRAIN.height - (it.y + 1.35 - PLAYER.rollHeight / 2);
+          const needStand = TRAIN.height - (it.y + 1.35 - PLAYER.height / 2);
+          const info = { lane: L, item: it.id, s: +it.s.toFixed(2), y: +it.y.toFixed(2), after: +d.toFixed(2), speed: +speedAt(it.s).toFixed(1), train: t.id };
+          if (dropFast < needRoll) add('coin-unreachable-from-roof', info);
+          else if (dropPlain < needStand) add('coin-needs-fast-fall-off-roof', info);
         }
       }
       if (it.kind === 'coin' || it.kind === 'power') {

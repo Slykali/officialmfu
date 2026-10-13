@@ -3,9 +3,13 @@
 //
 // Usage (suggested package.json script:  "test": "node test/bot.mjs"):
 //
-//   node test/bot.mjs                      quick run: 24 seeds x 2 variants to s=6000
-//   node test/bot.mjs --full               300 seeds x {safe, seek} to s=6000, plus
-//                                          blind/coins/jetstress variants on subsets
+//   node test/bot.mjs                      quick run (~4 min on 4 cores): 24 seeds x
+//                                          {safe, seek} to s=6000 + static scan
+//   node test/bot.mjs --full               ~1.5-2 h on 4 cores: 300 seeds x {safe, seek}
+//                                          to s=6000, plus blind, jetstress, coins,
+//                                          jetcoins, deep, deepseek, boardcrash,
+//                                          deepcoins on subsets
+//   (suggested extra script: "test:full": "node test/bot.mjs --full")
 //   node test/bot.mjs --seeds 1-50 --dist 4000 --variants safe,seek --workers 4
 //   node test/bot.mjs --seed 17 --variants seek --verbose     one seed, chatty
 //   node test/bot.mjs --json out.json      also write all per-run results as JSON
@@ -36,7 +40,7 @@
 // The bot only uses the public inputs left/right/jump/down, at most one per
 // 1/60 s frame, and steps the sim with step(1/60). It plans with lookahead
 // clones of the sim (see test/bot-lib.mjs). Every death, stumble and board
-// break is re-examined by an exhaustive search from checkpoints 3, 6 and 10 s
+// break is re-examined by a near-exhaustive search from checkpoints 3, 6, 10 s
 // earlier; a death that no search can avoid is reported as a GAME BUG together
 // with the obstacle layout. Exit code is 1 if any bug or sanity failure was
 // found, 0 otherwise.
@@ -91,7 +95,11 @@ function parseArgs(argv) {
     else if (a === '--probes') o.probes = true;
     else if (a === '--static') o.staticSeeds = Number(next());
     else if (a === '--start') o.start = Number(next());
-    else if (a === '--help' || a === '-h') { console.log(fs.readFileSync(SELF, 'utf8').split('\n').slice(1, 30).join('\n')); process.exit(0); }
+    else if (a === '--help' || a === '-h') {
+      const lines = fs.readFileSync(SELF, 'utf8').split('\n');
+      console.log(lines.slice(1, lines.findIndex((l) => l.startsWith('import '))).join('\n'));
+      process.exit(0);
+    }
     else throw new Error(`unknown argument ${a}`);
   }
   return o;
@@ -636,21 +644,22 @@ function runStatic(n, dist) {
     for (const i of r.issues) {
       agg[i.type] = (agg[i.type] || 0) + 1;
       if (!ex[i.type]) ex[i.type] = i;
-      if (i.type === 'coin-just-below-roof-end') { const b = i.after < 1 ? '<1.0' : '1.0-2.0'; after[b] = (after[b] || 0) + 1; }
+      if (i.type.startsWith('coin-') && i.after !== undefined) { const b = `${i.type}@${i.after < 1 ? '<1.0' : i.after < 2 ? '1.0-2.0' : '>=2.0'}m`; after[b] = (after[b] || 0) + 1; }
     }
   }
   return { n, dist, rows, items, agg, ex, after, ms: Date.now() - t0 };
 }
 
-const STATIC_WARN = new Set(['coin-just-below-roof-end']);
+const STATIC_WARN = new Set(['coin-needs-fast-fall-off-roof']);
 function reportStatic(r) {
   console.log(`\n[static] generator scan: ${r.n} seeds x ${r.dist} m, ${r.rows} rows, ${r.items} items, ${(r.ms / 1000).toFixed(1)} s`);
   let failed = false;
   if (!Object.keys(r.agg).length) console.log('  no issues');
+  if (Object.keys(r.after).length) console.log(`  coin offsets past the roof end: ${JSON.stringify(r.after)}`);
   for (const [t, n] of Object.entries(r.agg)) {
     const warn = STATIC_WARN.has(t);
     if (!warn) failed = true;
-    console.log(`  ${warn ? 'WARNING' : 'VIOLATION'} ${t}: ${n}${t === 'coin-just-below-roof-end' ? ' ' + JSON.stringify(r.after) : ''}; e.g. ${JSON.stringify(r.ex[t])}`);
+    console.log(`  ${warn ? 'WARNING' : 'VIOLATION'} ${t}: ${n}; e.g. ${JSON.stringify(r.ex[t])}`);
   }
   return failed;
 }
