@@ -127,6 +127,9 @@ export class Game {
     this.countdown = 0;
     this.time = 0;
     this.overAt = 0;
+    this.bankedCoins = 0;
+    this.bestAtStart = this.best;
+    this.dogSide = 1;
 
     this._resize();
     window.addEventListener('resize', () => this._resize());
@@ -134,10 +137,51 @@ export class Game {
       if (document.hidden) this.pause();
     });
     window.addEventListener('blur', () => this.pause());
+    // closing or leaving the page mid-run still banks the run's coins and score
+    window.addEventListener('pagehide', () => {
+      if (['playing', 'paused', 'countdown', 'dying'].includes(this.state)) {
+        this._saveRun();
+        this.missions.save();
+      }
+    });
+    // another tab changed saved progress: pick it up while not in a run
+    window.addEventListener('storage', (e) => {
+      if (!e.key || !e.key.startsWith('sr2-')) return;
+      this._reloadSaved();
+    });
 
+    this._prewarm();
     this.ui.showMenu(this._menuInfo());
     this.last = performance.now();
     requestAnimationFrame((t) => this._frame(t));
+  }
+
+  // Uploads every texture and compiles every shader up front, so the first
+  // orb or oncoming train doesn't cause a hitch mid-run.
+  _prewarm() {
+    const group = new THREE.Group();
+    for (const type of POWER_TYPES) group.add(makePower(type));
+    for (let livery = 0; livery < 4; livery++) {
+      for (let id = 0; id < 3; id++) group.add(makeTrain({ id, cars: 1, livery, ramp: id === 0, moving: false }));
+    }
+    group.add(makeTrain({ id: 0, cars: 2, livery: 4, ramp: false, moving: true }));
+    group.add(makeHurdle(), makeOverhead(), makeCoin());
+    const burst = makeBurst('magnet');
+    group.add(burst);
+    group.traverse((o) => {
+      const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+      for (const m of mats) {
+        for (const key of ['map', 'emissiveMap']) if (m[key]) this.renderer.initTexture(m[key]);
+      }
+    });
+    group.position.z = 1000; // out of sight
+    this.scene.add(group);
+    try {
+      this.renderer.compile(this.scene, this.camera);
+    } finally {
+      this.scene.remove(group);
+      burst.material.dispose();
+    }
   }
 
   // ------------------------------------------------------------- state
@@ -156,6 +200,8 @@ export class Game {
     this.camY = 0;
     this.deathT = 0;
     this.missions.startRun();
+    this.bankedCoins = 0;
+    this.bestAtStart = this.best;
     this.lastS = 0;
     this.cleanFrom = 0;
     this.state = 'playing';
@@ -185,7 +231,7 @@ export class Game {
     // quitting a run part-way still keeps its coins and score
     if (this.state === 'paused' || this.state === 'countdown') {
       this._saveRun();
-      this._missionsDone(this.missions.endRun());
+      this._missionsDone(this.missions.endRun(this.sim.s >= 50));
     }
     if (this.state === 'chars') this._setRunnerLook(this.charId);
     if (this.state === 'maps') this._applyMap(this.mapId);
@@ -229,16 +275,33 @@ export class Game {
     };
   }
 
+  // Banks the run's coins and score. Safe to call more than once per run:
+  // only coins not yet banked are added.
   _saveRun() {
     const score = Math.floor(this.sim.score);
-    const newBest = score > this.best;
-    if (newBest) {
+    this.best = Math.max(this.best, loadNumber('sr2-best'));
+    if (score > this.best) {
       this.best = score;
       save('sr2-best', score);
     }
-    this.bank += this.sim.coins;
-    save('sr2-coins', this.bank);
-    return { score, newBest };
+    const fresh = this.sim.coins - this.bankedCoins;
+    if (fresh > 0) {
+      this.bank = loadNumber('sr2-coins') + fresh;
+      save('sr2-coins', this.bank);
+      this.bankedCoins = this.sim.coins;
+    }
+    return { score, newBest: score > this.bestAtStart };
+  }
+
+  _reloadSaved() {
+    this.best = Math.max(this.best, loadNumber('sr2-best'));
+    this.bank = loadNumber('sr2-coins');
+    const owned = load('sr2-owned', []);
+    if (Array.isArray(owned)) for (const id of owned) if (CHARACTERS.some((c) => c.id === id)) this.owned.add(id);
+    this.missions.reload();
+    if (this.state === 'menu') this.ui.showMenu(this._menuInfo());
+    else if (this.state === 'chars') this._showPreview();
+    else if (this.state === 'missions') this.ui.showMissions(this.missions.view());
   }
 
   _gameOver() {
@@ -246,7 +309,7 @@ export class Game {
     this.overAt = this.time;
     const { score, newBest } = this._saveRun();
     if (newBest) this.audio.play('record');
-    this._missionsDone(this.missions.endRun());
+    this._missionsDone(this.missions.endRun(this.sim.s >= 50));
     this.ui.showOver({
       score, coins: this.sim.coins, best: this.best, newBest,
       cause: DEATH_TEXT[this.sim.deathCause] || '', distance: Math.floor(this.sim.s), level: this.sim.level,
@@ -287,7 +350,7 @@ export class Game {
         save('sr2-char', c.id);
         this.audio.play('power');
       }
-    } else if (this.bank >= c.price) {
+    } else if ((this.bank = loadNumber('sr2-coins')) >= c.price) {
       this.bank -= c.price;
       save('sr2-coins', this.bank);
       this.owned.add(c.id);
@@ -384,7 +447,7 @@ export class Game {
 
   _missionsDone(list) {
     for (const d of list) {
-      this.bank += d.reward;
+      this.bank = loadNumber('sr2-coins') + d.reward;
       save('sr2-coins', this.bank);
       this.audio.play('record');
       this.ui.toast(d.bonus ? `All missions done! +${d.reward}` : `Mission complete! +${d.reward}`);
@@ -528,6 +591,13 @@ export class Game {
   _update(dt) {
     this.time += dt;
     const sim = this.sim;
+    if ((this.state === 'menu' || this.state === 'missions') && this.time - (this.missionTick || 0) > 1) {
+      // keep the countdown fresh and pick up new missions at midnight
+      this.missionTick = this.time;
+      const rolled = this.missions.refresh();
+      if (this.state === 'missions') this.ui.showMissions(this.missions.view());
+      else if (rolled) this.ui.showMenu(this._menuInfo());
+    }
     if (this.state === 'playing') {
       sim.step(dt);
       this._handleEvents(sim.takeEvents());
@@ -554,7 +624,9 @@ export class Game {
     }
     if (this.state === 'dying' || this.state === 'over') {
       // the body drops to whatever is underneath it
-      const ground = surfaceHeight(sim.trains, sim.x, sim.s + 0.9, PLAYER.halfW, PLAYER.halfD, sim.s);
+      // the body slides back as it falls, so look for ground where it ends up
+      const k = Math.min(1, this.deathT / 0.45);
+      const ground = surfaceHeight(sim.trains, sim.x, sim.s - 0.9 * k, PLAYER.halfW, PLAYER.halfD, sim.s);
       this.deathVy -= 30 * dt;
       this.deathY = Math.max(ground, this.deathY + this.deathVy * dt);
       if (this.deathY === ground) this.deathVy = 0;
@@ -768,10 +840,14 @@ export class Game {
     }
 
     // dog: runs a little ahead of the guard, on the side nearer the middle of the track
-    const side = gx > 0.1 ? -1 : 1;
-    const ds = gs + 0.7;
-    const dxTarget = gx + side * 0.85;
-    const dx = d.root.position.x + (dxTarget - d.root.position.x) * Math.min(1, dt * 5);
+    // stay on the side nearer the middle; only switch at an outer lane so the dog never cuts through the guard
+    if (sim.lane === 0) this.dogSide = 1;
+    else if (sim.lane === 2) this.dogSide = -1;
+    const side = this.dogSide || 1;
+    // a body length ahead of the guard, so switching sides never passes through the guard
+    const ds = gs + 1.6;
+    this.dogOffset = (this.dogOffset ?? 0.8) + (side * 0.8 - (this.dogOffset ?? 0.8)) * Math.min(1, dt * 4);
+    const dx = gx + this.dogOffset;
     const dy = surfaceHeight(sim.trains, dx, ds, 0.2, 0.4, sim.s);
     d.root.visible = visible;
     d.root.position.set(dx, d.root.position.y + (dy - d.root.position.y) * Math.min(1, dt * 10), -ds);
@@ -787,7 +863,7 @@ export class Game {
       d.tail.rotation.y = Math.sin(p * 2) * 0.4;
     } else if (caught) {
       // sitting, tail wagging
-      d.body.rotation.x = -0.35;
+      d.body.rotation.x = 0.35;
       d.body.position.y = -0.1;
       d.legs[2].rotation.x = d.legs[3].rotation.x = 1.0;
       d.tail.rotation.y = Math.sin(this.time * 18) * 0.7;
@@ -805,12 +881,20 @@ export class Game {
     const z = -sim.s;
     if (this.state === 'chars') {
       // close-up from the front for the character screen
-      // keep the whole character in the part of the screen above the bottom panel
-      const dist = Math.min(7, Math.max(5, 1.7 / (tanHalf * aspect)));
-      cam.position.set(sim.x, 1.45, z - 0.6 + dist);
-      cam.lookAt(sim.x, 1.0 - dist * 0.17, z);
+      // fit the whole character into the part of the screen above the bottom panel
+      const H = window.innerHeight || 1;
+      const free = Math.max(0.3, Math.min(1, this.ui.panelTop('chars') / H)); // fraction of the screen above the panel
+      const needH = 2.5; // world units of height to show (character plus margin)
+      const needW = 1.8;
+      const dist = Math.max(3, needH / (2 * tanHalf * free), needW / (2 * tanHalf * aspect));
+      cam.position.set(sim.x, 1.0, z + dist);
+      cam.lookAt(sim.x, 1.0, z);
+      // shift the image up so the character is centred in the free area
+      const W = window.innerWidth || 1;
+      cam.setViewOffset(W, H, 0, (H * (1 - free)) / 2, W, H);
       return;
     }
+    if (cam.view && cam.view.enabled) cam.clearViewOffset();
     if (this.state === 'maps') {
       // a wider, higher view so the scenery shows
       cam.position.set(0, 6.5, z + Math.max(10, back + 3));

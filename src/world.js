@@ -94,6 +94,22 @@ function makeCactus(rand) {
   return g;
 }
 
+// round, soft-edged snowflake
+function flakeTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.6, 'rgba(255,255,255,0.8)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 32, 32);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 export class World {
   constructor(scene) {
     this.scene = scene;
@@ -226,7 +242,7 @@ export class World {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.snow = new THREE.Points(geo, new THREE.PointsMaterial({
-      color: '#ffffff', size: 0.16, transparent: true, opacity: 0.9, depthWrite: false,
+      color: '#ffffff', size: 0.2, map: flakeTexture(), transparent: true, opacity: 0.95, depthWrite: false, alphaTest: 0.05,
     }));
     this.snow.frustumCulled = false;
     this.snow.visible = false;
@@ -344,7 +360,8 @@ export class World {
     }
     for (const prop of tile.userData.deco.children) {
       const { side, k } = prop.userData;
-      prop.position.set(side * (6.5 + this.rand() * 0.8), 0, -6 - k * 20 - this.rand() * 10);
+      const base = theme.deco === 'palms' ? 7.3 : 6.5; // palm leaves spread wide; keep them clear of the outer lanes
+      prop.position.set(side * (base + this.rand() * 0.6), 0, -6 - k * 20 - this.rand() * 10);
       prop.rotation.y = this.rand() * Math.PI * 2;
     }
   }
@@ -380,7 +397,10 @@ export class World {
         let y = a[i * 3 + 1] - dt * (2.2 + (i % 7) * 0.25);
         if (y < 0) y += 26;
         a[i * 3 + 1] = y;
-        a[i * 3] += Math.sin(y * 0.8 + i) * dt * 0.4;
+        let x = a[i * 3] + Math.sin(y * 0.8 + i) * dt * 0.4;
+        if (x > 22) x -= 44;
+        else if (x < -22) x += 44;
+        a[i * 3] = x;
         let z = a[i * 3 + 2] + moved;
         if (z > 15) z -= 110;
         a[i * 3 + 2] = z;

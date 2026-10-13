@@ -271,7 +271,7 @@ kbd {
   white-space: nowrap;
   max-width: 92vw;
   text-align: center;
-  z-index: 15;
+  z-index: 22;
 }
 #toast.show { animation: toast 1.4s ease-out forwards; }
 
@@ -359,7 +359,7 @@ kbd {
 .dots i { width: 8px; height: 8px; border-radius: 50%; background: #ced4da; }
 .dots i.on { background: var(--pink); }
 #charAction { display: flex; align-items: center; justify-content: center; gap: 8px; }
-#charAction.selected { background: #adb5bd; box-shadow: 0 6px 0 #868e96; }
+#charAction.selected, #mapAction.selected { background: #adb5bd; box-shadow: 0 6px 0 #868e96; }
 #charAction.locked { background: #f59f00; box-shadow: 0 6px 0 #b35c00; }
 #charAction.nudge { animation: nudge 0.4s; }
 @keyframes nudge {
@@ -378,12 +378,23 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  /* toasts simply appear and disappear (the script removes .show) */
+  #toast.show { animation: none; opacity: 1; transform: translate(-50%, 0); }
+  .new-best, .mult.hot, .mult.pop, .coin-pill.pop .coin-icon { animation: none; }
 }
 
-@media (max-width: 640px) {
-  /* keep the bottom panels' buttons clear of the corner mute button */
-  .chars-screen { padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 62px); }
+@media (max-width: 700px), (max-height: 520px) {
+  /* keep panel buttons clear of the corner mute button */
+  .screen { padding-bottom: calc(max(8px, env(safe-area-inset-bottom)) + 58px); }
+}
+@media (max-height: 520px) and (min-aspect-ratio: 4/3) {
+  /* short landscape screens: clear the mute button from the side instead, keeping the full height */
+  .screen { padding-bottom: max(8px, env(safe-area-inset-bottom)); padding-right: 72px; padding-left: 72px; }
 }
 
 /* ---------------- menu tiles */
@@ -402,7 +413,7 @@ kbd {
 }
 .tile-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #adb5bd; }
 .t-label { font: 700 11px system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.06em; color: #868e96; }
-.t-value { font-size: 15px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-value { font-size: clamp(12px, 3.4vw, 15px); line-height: 1.1; max-width: 100%; overflow-wrap: anywhere; text-wrap: balance; }
 .mult.pop { animation: pop 0.35s ease-out; }
 
 /* ---------------- missions */
@@ -446,4 +457,30 @@ kbd {
   .mission-list { gap: 5px; }
   #missionsScreen .panel { width: min(620px, 100%); }
   .over-missions { grid-column: 1 / -1; margin-bottom: 4px; }
+}
+
+/* very short landscape screens (small phones held sideways) */
+@media (max-height: 360px) and (min-aspect-ratio: 4/3) {
+  .help .dim { display: none; }
+  h2 { font-size: 22px; }
+  .mission-list { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .mission { grid-template-columns: 1fr; gap: 4px; align-items: start; }
+  .m-check { display: none; }
+  .m-text { font-size: 13px; }
+  .m-reward { font-size: 14px; }
+  .mission-bonus, .mission-reset { font-size: 12px; margin-bottom: 2px; }
+}
+
+/* small portrait phones */
+@media (max-width: 360px) and (max-height: 640px) {
+  .mission { padding: 8px 10px; gap: 8px; }
+  .m-text { font-size: 14px; }
+  .mission-list { gap: 6px; }
+  #missionsScreen h2 { font-size: 26px; margin-bottom: 4px; }
+  #missionsScreen .big-btn { padding: 10px; font-size: 20px; margin: 4px 0 0; }
+}
+@media (max-height: 380px) {
+  #missionsScreen h2 { margin-bottom: 2px; }
+  #missionsScreen .big-btn { padding: 8px; margin: 2px 0 0; }
+  .mission-list { margin-bottom: 6px; }
 }

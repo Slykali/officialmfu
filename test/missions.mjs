@@ -77,4 +77,55 @@ const bad = store(); bad.set('sr2-missions', '{not json');
 assert.doesNotThrow(() => new Missions({ storage: bad }));
 // reset countdown is within a day
 assert.ok(ms.msUntilReset() > 0 && ms.msUntilReset() <= 86400000);
+// two tabs sharing storage never pay the same mission twice
+{
+  const shared = store();
+  const day = () => new Date(2026, 9, 20, 12);
+  const a = new Missions({ storage: shared, now: day });
+  const b = new Missions({ storage: shared, now: day });
+  let paidA = 0;
+  let paidB = 0;
+  a.startRun(); b.startRun();
+  for (let i = 0; i < 3000; i++) {
+    for (const [m, add] of [[a, (r) => { paidA += r; }], [b, (r) => { paidB += r; }]]) {
+      for (const d of [...m.add('coin'), ...m.add('jump'), ...m.add('roll'), ...m.add('roof', 1), ...m.add('meters', 10),
+        ...['jetpack', 'sneakers', 'magnet', 'board', 'multiplier'].flatMap((k) => m.add('orb', 1, k))]) add(d.reward);
+      for (const d of m.runStats({ coins: 999, distance: 99999, score: 1e6, level: 10, clean: 99999 })) add(d.reward);
+    }
+  }
+  for (let i = 0; i < 20; i++) {
+    for (const d of a.endRun()) paidA += d.reward;
+    a.startRun();
+    for (const d of b.endRun()) paidB += d.reward;
+    b.startRun();
+  }
+  const total = a.list.reduce((s, m) => s + m.reward, 0) + BONUS_REWARD;
+  assert.equal(paidA + paidB, total, 'shared storage pays each mission once in total');
+}
+// quitting straight away doesn't count as a run
+{
+  const st = store();
+  const m = new Missions({ storage: st, now: () => new Date(2026, 9, 21) });
+  const idx = m.list.findIndex((x) => x.type === 'runs_day');
+  if (idx >= 0) {
+    m.startRun(); m.endRun(false);
+    assert.equal(m.state.progress[idx], 0);
+    m.startRun(); m.endRun(true);
+    assert.equal(m.state.progress[idx], 1);
+  }
+}
+// a save with a malformed done list is ignored instead of granting the bonus
+{
+  const st = store();
+  const key = dateKey(new Date(2026, 9, 22));
+  st.set('sr2-missions', JSON.stringify({ date: key, progress: [0, 0, 0], done: [], bonus: false }));
+  const m = new Missions({ storage: st, now: () => new Date(2026, 9, 22) });
+  assert.equal(m.allDone, false);
+}
+// mission text reads naturally
+for (let d = 0; d < 400; d++) {
+  for (const m of missionsFor(dateKey(new Date(2026, 0, 1 + d)))) {
+    assert.ok(!/ 2x orb/.test(m.text) && !/Collect 1 /.test(m.text), m.text);
+  }
+}
 console.log('missions: all checks passed');

@@ -203,7 +203,7 @@ export function stateKey(c, fine) {
 export class SafeLaneOracle {
   constructor(seed) {
     this.gen = new LevelGenerator(seed);
-    this.rows = []; // {s, safe, shifted, kinds}
+    this.rows = []; // {s, safe, prevSafe, items: ids of non-coin items of the row}
     const g = this.gen;
     const proto = Object.getPrototypeOf(g);
     const rows = this.rows;

@@ -137,6 +137,14 @@ export class UI {
     this.el.charDots.innerHTML = dots;
   }
 
+  // Top edge (px) of a screen's panel, used to frame the 3D preview above it.
+  panelTop(screen) {
+    const el = this.el[screen];
+    const panel = el && el.querySelector('.panel');
+    if (!panel || el.classList.contains('hidden')) return window.innerHeight;
+    return panel.getBoundingClientRect().top;
+  }
+
   // shake the unlock button when the player can't afford it
   nudge() {
     const b = this.el.charAction;

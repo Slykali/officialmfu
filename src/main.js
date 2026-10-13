@@ -75,8 +75,16 @@ function boot() {
   });
   // Tapping anywhere on the menu starts a run. This listens for the click (not the
   // pointer release) so the same tap can't also land on the pause button that appears.
-  document.getElementById('menu').addEventListener('click', (e) => {
-    if (e.target instanceof Element && e.target.closest('button')) return;
+  // Only taps on the open background start a run: not buttons, not the gaps
+  // between them, and not the end of a mouse drag.
+  const menu = document.getElementById('menu');
+  let down = null;
+  menu.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+  menu.addEventListener('click', (e) => {
+    const moved = down ? Math.hypot(e.clientX - down.x, e.clientY - down.y) : 0;
+    down = null;
+    if (moved > 12) return;
+    if (e.target instanceof Element && e.target.closest('.panel')) return;
     if (game.state === 'menu') game.start();
   });
   document.getElementById('loading').classList.add('hidden');

@@ -133,6 +133,8 @@ export function makeCharacter(o) {
   return { root, pivot, body, legs, arms, head };
 }
 
+let jetParts = null; // shared so swapping characters doesn't leak GPU buffers
+
 export function makeRunner(look) {
   const c = makeCharacter(look);
   // hoverboard
@@ -146,9 +148,14 @@ export function makeRunner(look) {
   c.board = board;
   // jetpack
   const jet = new THREE.Group();
-  const tank = new THREE.CylinderGeometry(0.11, 0.11, 0.55, 12);
-  const flameGeo = new THREE.ConeGeometry(0.1, 0.5, 10);
-  const flameMat = new THREE.MeshBasicMaterial({ color: '#ffa94d' });
+  if (!jetParts) {
+    jetParts = {
+      tank: new THREE.CylinderGeometry(0.11, 0.11, 0.55, 12),
+      flameGeo: new THREE.ConeGeometry(0.1, 0.5, 10),
+      flameMat: new THREE.MeshBasicMaterial({ color: '#ffa94d' }),
+    };
+  }
+  const { tank, flameGeo, flameMat } = jetParts;
   for (const side of [-1, 1]) {
     jet.add(mesh(tank, mat('#adb5bd', { metalness: 0.7, roughness: 0.3 }), side * 0.13, 1.15, 0.42));
     const f = new THREE.Mesh(flameGeo, flameMat);
