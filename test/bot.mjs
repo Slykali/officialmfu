@@ -28,6 +28,7 @@
 //   deep       like safe, but the run starts at s=6000..9500 (top speed and
 //              difficulty) and goes 3000 m further (--dist = length, --start)
 //   deepseek   deep + seek
+//   deepcoins  coins, starting at top speed (deep start), 1500 m
 //   boardcrash the harness hands the bot a board every ~12 s and the bot then
 //              deliberately crashes into something to exercise board + grace
 //
@@ -112,7 +113,7 @@ function buildJobs(o) {
     const variants = o.variants || ['safe', 'seek'];
     for (const v of variants) {
       for (const s of seeds) {
-        if (v === 'deep' || v === 'deepseek') jobs.push({ seed: s, variant: v, start: o.start ?? 6000 + 500 * (s % 8), dist: (o.start ?? 6000 + 500 * (s % 8)) + o.dist });
+        if (v === 'deep' || v === 'deepseek' || v === 'deepcoins') jobs.push({ seed: s, variant: v, start: o.start ?? 6000 + 500 * (s % 8), dist: (o.start ?? 6000 + 500 * (s % 8)) + o.dist });
         else jobs.push({ seed: s, variant: v, dist: o.dist });
       }
     }
@@ -128,6 +129,7 @@ function buildJobs(o) {
     for (const s of range(6001, 6100)) jobs.push({ seed: s, variant: 'deep', start: 6000 + 500 * (s % 8), dist: 9000 + 500 * (s % 8) });
     for (const s of range(7001, 7100)) jobs.push({ seed: s, variant: 'deepseek', start: 6000 + 500 * (s % 8), dist: 9000 + 500 * (s % 8) });
     for (const s of range(8001, 8030)) jobs.push({ seed: s, variant: 'boardcrash', dist: o.dist });
+    for (const s of range(9001, 9006)) jobs.push({ seed: s, variant: 'deepcoins', start: 6000 + 500 * (s % 8), dist: 7500 + 500 * (s % 8) });
     return jobs;
   }
   for (const s of range(1, 24)) jobs.push({ seed: s, variant: 'safe', dist: o.dist });
@@ -151,6 +153,7 @@ function variantBot(variant, oracle) {
     case 'jetcoins': return new Bot({ oracle, powers: 'ignore', coins: true });
     case 'deep': return new Bot({ oracle, powers: 'avoid' });
     case 'boardcrash': return new Bot({ oracle, powers: 'seek', crashBoard: true });
+    case 'deepcoins': return new Bot({ oracle, powers: 'avoid', coins: true });
     case 'deepseek': return new Bot({ oracle, powers: 'seek' });
     default: throw new Error(`unknown variant ${variant}`);
   }
@@ -438,11 +441,11 @@ export function runOne(job, log = () => {}) {
     }
 
     // ---- coins / powers passed without pickup
-    if (variant === 'coins' || variant === 'jetcoins') {
+    if (variant === 'coins' || variant === 'jetcoins' || variant === 'deepcoins') {
       for (const c of sim.coinItems) {
         if (passed.has(c.id) || c.s >= sim.s - 1.5) continue;
         passed.add(c.id);
-        if (c.id < 0 && variant === 'coins') continue; // jetpack sky coins
+        if (c.id < 0 && variant !== 'jetcoins') continue; // jetpack sky coins
         if (c.id > 0 && variant === 'jetcoins') continue; // ground coins under a forced flight are expected misses
         const miss = { id: c.id, lane: c.lane, s: c.s, y: c.y, frame: R.frames };
         R.coinsMissed.push(miss);
@@ -830,7 +833,7 @@ function report(results, o, ms) {
       console.log(`  power-ups passed without pickup: ${pmiss.length}${pmiss.length ? ' e.g. ' + JSON.stringify(pmiss.slice(0, 3)) : ''}`);
       console.log(`  jetpack sky coins left behind: ${ok.reduce((a, r) => a + (r.skyMissed || 0), 0)}`);
     }
-    if (v === 'coins' || v === 'jetcoins') {
+    if (v === 'coins' || v === 'jetcoins' || v === 'deepcoins') {
       const seen = ok.reduce((a, r) => a + r.coinsTaken + r.coinsMissed.length, 0);
       const missed = ok.reduce((a, r) => a + r.coinsMissed.length, 0);
       const checked = ok.reduce((a, r) => a + (r.coinsMissedChecked || 0), 0);
