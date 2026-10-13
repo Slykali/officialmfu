@@ -49,7 +49,7 @@ if (isMainThread && !process.env.BOT_SRC_DIR && !process.argv.includes('--live-s
 const {
   Sim, Bot, SafeLaneOracle, applyAction, DT, ACTION_NAMES, describeLayout, checkpoint, judge,
   itemFingerprint, search, rootFromCheckpoint, laneX, PLAYER, TRAIN, RAMP_L, HURDLE, OVERHEAD, trainFront,
-  surfaceHeight, hitBarrier, SRC_URL,
+  surfaceHeight, hitBarrier, SRC_URL, cloneSim,
 } = await import('./bot-lib.mjs');
 
 const SELF = fileURLToPath(import.meta.url);
@@ -74,6 +74,7 @@ function parseArgs(argv) {
     else if (a === '--json') o.json = next();
     else if (a === '--no-judge') o.judge = false;
     else if (a === '--live-src') { /* import ../src directly instead of a snapshot */ }
+    else if (a === '--selftest') o.selftest = true;
     else if (a === '--help' || a === '-h') { console.log(fs.readFileSync(SELF, 'utf8').split('\n').slice(1, 30).join('\n')); process.exit(0); }
     else throw new Error(`unknown argument ${a}`);
   }
@@ -387,6 +388,7 @@ export function runOne(job, log = () => {}) {
     R.deaths.push(d);
     if (d.verdict === 'UNAVOIDABLE') R.bugs.push({ kind: 'unavoidable-death', ...d });
   }
+  R.coinsMissedChecked = coinChecks;
   R.ms = Date.now() - t0;
   if (!sim.alive) R.actionsB64 = Buffer.from(Uint8Array.from(actions)).toString('base64');
   return R;
@@ -496,6 +498,59 @@ function frameRateProbe() {
 }
 
 // ---------------------------------------------------------------------------
+// Self-test of the harness itself: the judge must call a careless death
+// avoidable and a wall across all three lanes unavoidable, and lookahead must
+// never mutate the real sim.
+function selftest() {
+  let pass = true;
+  const say = (ok, msg) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`); if (!ok) pass = false; };
+  // 1. careless random player dies; the judge must find it avoidable
+  {
+    const seed = 7;
+    const sim = new Sim(seed);
+    const cps = [];
+    let rnd = 12345;
+    const rand = () => ((rnd = (Math.imul(rnd, 1103515245) + 12345) >>> 0) / 4294967296);
+    let f = 0;
+    while (sim.alive && f < 20000) {
+      if (f % 30 === 0) cps.push(checkpoint(sim, f));
+      if (rand() < 0.04) applyAction(sim, 1 + Math.floor(rand() * 4));
+      sim.step(DT); sim.takeEvents(); sim.added.length = 0; sim.removed.length = 0; f++;
+    }
+    const d = analyseFailure({ seed }, cps.slice(-26), f, sim, null, { strict: false });
+    say(!sim.alive && d.verdict.startsWith('avoidable'), `random player died at s=${sim.s.toFixed(1)} (${sim.deathCause}); judge: ${d.verdict} ${JSON.stringify(d.tries.map((t) => [t.secondsBefore, t.survived]))}`);
+  }
+  // 2. an injected wall of plain trains across all lanes must be unavoidable
+  {
+    const seed = 1;
+    const sim = new Sim(seed);
+    for (let i = 0; i < 60; i++) { sim.step(DT); sim.takeEvents(); }
+    const cp = checkpoint(sim, 60);
+    const wallS = sim.s + 45;
+    for (let lane = 0; lane < 3; lane++) cp.sim.trains.push({ kind: 'train', id: 900000 + lane, lane, s: wallS, cars: 2, len: 28, ramp: false, moving: false, k: 0, R: 0, livery: 0 });
+    const framesToWall = Math.ceil(((wallS - sim.s) / sim.speed) * 60) + 60;
+    const r = judge(cp, seed, 60 + framesToWall, { beam: 30000 });
+    say(!r.ok, `wall across all lanes at s=${wallS.toFixed(1)}: judge survived=${r.ok} depth=${r.depth}/${r.horizon} peak=${r.peak}`);
+    // ... and the same wall with a ramp in lane 2 must be survivable
+    cp.sim.trains[cp.sim.trains.length - 1].ramp = true;
+    const r2 = judge(cp, seed, 60 + framesToWall, { beam: 30000 });
+    say(r2.ok, `same wall but lane 2 has a ramp: judge survived=${r2.ok}`);
+  }
+  // 3. lookahead with board + magnet never mutates the real sim
+  {
+    const sim = new Sim(3);
+    for (let i = 0; i < 200; i++) { sim.step(DT); sim.takeEvents(); }
+    sim.power.board = 30; sim.power.magnet = 12;
+    const fp = itemFingerprint(sim);
+    const root = cloneSim(sim, { coins: true });
+    search(root, { horizon: 150, every: 2, beam: 300 });
+    for (let k = 0; k < 20; k++) { const c = cloneSim(sim, { coins: true }); for (let i = 0; i < 300 && c.alive; i++) { applyAction(c, (i * 7 + k) % 5); c.step(DT); } }
+    say(itemFingerprint(sim) === fp, 'lookahead clones (board+magnet held) left the real sim untouched');
+  }
+  return pass;
+}
+
+// ---------------------------------------------------------------------------
 // worker / main
 if (!isMainThread) {
   parentPort.on('message', (job) => {
@@ -514,6 +569,7 @@ if (!isMainThread) {
 
 async function main() {
   const o = parseArgs(process.argv.slice(2));
+  if (o.selftest) process.exit(selftest() ? 0 : 1);
   const jobs = buildJobs(o);
   const t0 = Date.now();
   const md5 = await srcFingerprint();
@@ -533,7 +589,7 @@ async function main() {
         results.push(r);
         const tag = r.error ? 'ERROR' : r.alive ? 'ok  ' : 'DEAD';
         if (o.verbose || !r.alive || r.error || (r.bugs && r.bugs.length) || (r.anomalies && r.anomalies.length)) {
-          console.log(`${tag} ${r.variant} seed=${r.seed} s=${r.s} ${r.deathCause || ''} ` +
+          console.log(`${tag} ${r.variant} seed=${r.seed} s=${r.s} ${(r.ms / 1000).toFixed(1)}s ${r.deathCause || ''} ` +
             `${r.deaths && r.deaths[0] ? r.deaths[0].verdict : ''} anomalies=${r.anomalies ? r.anomalies.length : '?'} ${r.error ? r.error.split('\n')[0] : ''}`);
         }
         if (results.length % 20 === 0) console.log(`  ... ${results.length}/${jobs.length} done (${((Date.now() - t0) / 1000).toFixed(0)} s)`);
@@ -621,6 +677,8 @@ function report(results, o, ms) {
       const unreach = ok.flatMap((r) => r.coinsUnreachable.map((c) => ({ seed: r.seed, ...c })));
       console.log(`  coins: taken=${ok.reduce((a, r) => a + r.coinsTaken, 0)} missed=${missed} of ~${seen}; missed coins re-checked=${checked}, unreachable=${unreach.length}`);
       for (const u of unreach.slice(0, 12)) console.log(`    unreachable coin seed=${u.seed} id=${u.id} lane=${u.lane} s=${u.s.toFixed(2)}: ${u.context}`);
+      const reach = ok.flatMap((r) => r.coinsMissed.filter((c) => c.reachable).map((c) => ({ seed: r.seed, id: c.id, s: +c.s.toFixed(2), how: c.how })));
+      if (reach.length) console.log(`    missed but reachable (bot weakness): ${JSON.stringify(reach.slice(0, 6))}`);
     }
     if (dead.some((r) => r.deaths[0].verdict === 'UNAVOIDABLE')) failed = true;
     if (ok.some((r) => r.incidents.some((i) => i.verdict && i.verdict.startsWith('UNAVOIDABLE')))) failed = true;
