@@ -129,7 +129,7 @@ export function makeRunner() {
 export function makeGuard() {
   return makeCharacter({
     skin: '#e0ac69', shirt: '#1d3557', pants: '#14213d', shoes: '#111111', cap: '#14213d',
-    badge: true, belt: true, brimForward: true, scale: 1.12,
+    badge: true, belt: true, brimForward: true, scale: 1.05,
   });
 }
 

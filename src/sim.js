@@ -148,7 +148,7 @@ export class Sim {
         nx = this.x;
         this._stumble();
         if (!this.alive) return;
-      } else if (this.graceT > 0) {
+      } else if (this.graceT > 0 || this.flying) {
         this.y = this._surface(nx, ns); // invulnerable: hop onto the roof
         this.vy = Math.max(this.vy, 0);
       } else if (this.power.board > 0) {
@@ -198,7 +198,7 @@ export class Sim {
     }
 
     // --- barriers ---
-    if (this.graceT <= 0) {
+    if (this.graceT <= 0 && !this.flying) {
       const b = hitBarrier(this.barriers, this.x, this.s, this.y, this.height, PLAYER.halfW, PLAYER.halfD);
       if (b) {
         if (this.power.board > 0) {
@@ -280,7 +280,7 @@ export class Sim {
   _stumble() {
     if (this.stumbleCool > 0) return;
     this.stumbleCool = 0.5;
-    if (this.graceT > 0) {
+    if (this.graceT > 0 || this.flying) {
       this.events.push({ type: 'bump' });
       return;
     }

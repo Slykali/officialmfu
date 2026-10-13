@@ -112,7 +112,7 @@ export class Game {
     this.sim.takeEvents();
     this.runPhase = 0;
     this.shake = 0;
-    this.guardGap = 2.4; // the guard starts right behind and falls back
+    this.guardGap = 3.4; // the guard starts right behind and falls back
     this.camY = 0;
     this.deathT = 0;
     this.runStart = this.time;
@@ -438,8 +438,8 @@ export class Game {
     let target = 30;
     if (this.state === 'menu') target = 30;
     else if (this.state === 'dying' || this.state === 'over') target = 1.4;
-    else if (sim.stumbleT > 0) target = 2.6;
-    else if (this.time - this.runStart < 1.8) target = 2.4;
+    else if (sim.stumbleT > 0) target = 3.6;
+    else if (this.time - this.runStart < 1.8) target = 3.4;
     const rate = target < this.guardGap ? 3 : 0.9;
     this.guardGap += (target - this.guardGap) * Math.min(1, dt * rate);
     const gs = sim.s - this.guardGap;
