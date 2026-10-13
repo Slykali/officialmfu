@@ -249,6 +249,7 @@ export function search(root, opt) {
   const fine = !!opt.fine;
   const allowStumble = !!opt.allowStumble;
   const allowBoard = !!opt.allowBoard;
+  const boardBonus = opt.boardBonus || 0; // >0: deliberately crash while holding a board (boardcrash variant)
   const reward = opt.reward || null;
   const coinW = opt.coinWeight || 0;
   const powerW = opt.powerWeight || 0;
@@ -282,19 +283,21 @@ export function search(root, opt) {
         if (!c.alive) continue;
         let inc = node.inc;
         let pk = node.pk;
+        let bb = node.bb || 0;
         let bad = false;
         const ev = c.events;
         for (let i = 0; i < ev.length; i++) {
           if (ev[i].kind !== undefined) continue; // an item pushed to the shared added/removed scratch
           const t = ev[i].type;
           if (t === 'stumble') { if (!allowStumble) bad = true; inc += 1; }
-          else if (t === 'boardBreak') { if (!allowBoard) bad = true; inc += 1; }
+          else if (t === 'boardBreak') { if (!allowBoard) bad = true; if (boardBonus) bb += 1; else inc += 1; }
           else if (t === 'power') pk += 1;
         }
         ev.length = 0;
         if (c.removed.length) c.removed.length = 0;
         if (bad) continue;
-        let v = node.v + (a !== A_NONE ? -0.002 : 0) + coinW * (c.coins - coinsBefore) + powerW * (pk - node.pk) - 50 * (inc - node.inc);
+        let v = node.v + (a !== A_NONE ? -0.002 : 0) + coinW * (c.coins - coinsBefore) + powerW * (pk - node.pk) - 50 * (inc - node.inc) +
+          boardBonus * (bb - (node.bb || 0));
         if (reward) v += reward(c);
         const key = stateKey(c, fine);
         const slow = KEY_SLOW;
@@ -302,7 +305,7 @@ export function search(root, opt) {
         let useAlt = false;
         if (prev && prev.slow !== slow) { useAlt = true; prev = alt.get(key + ':' + slow); }
         if (prev && prev.v >= v) continue;
-        const nn = { sim: c, path: { a, prev: node.path }, v, inc, pk, slow };
+        const nn = { sim: c, path: { a, prev: node.path }, v, inc, pk, slow, bb };
         if (useAlt) alt.set(key + ':' + slow, nn); else map.set(key, nn);
         if (goal && goal(c, nn)) return finish(nn, f + 1, true);
       }
@@ -320,7 +323,8 @@ export function search(root, opt) {
   }
   let best = null;
   for (const n of frontier) if (!best || n.v > best.v) best = n;
-  return finish(best, depth, depth === H);
+  // with a goal, surviving the horizon without reaching it is a failure
+  return finish(best, depth, depth === H && !goal);
 
   function finish(n, d, ok) {
     const plan = [];
@@ -366,6 +370,7 @@ export class Bot {
     this.coins = !!opt.coins;
     this.oracle = opt.oracle || null;
     this.safeWeight = opt.safeWeight ?? 0.02;
+    this.crashBoard = !!opt.crashBoard;
     this.plan = [];
     this.tail = null;
     this.sinceSync = Infinity;
@@ -386,6 +391,7 @@ export class Bot {
     };
     return {
       horizon: this.horizon, every: this.every, beam: this.beam, reward,
+      ...(this.crashBoard && this.holdingBoard ? { allowBoard: true, boardBonus: 60 } : {}),
       coinWeight: this.coins ? 0.6 : 0,
       powerWeight: this.powers === 'seek' ? 40 : this.powers === 'avoid' ? -40 : 0,
     };
@@ -397,13 +403,14 @@ export class Bot {
       applyAction(c, this.plan[i]);
       c.step(DT);
       c.removed.length = 0;
-      if (!c.alive || badEvents(c, this.powers)) return null;
+      if (!c.alive || badEvents(c, this.powers, this.crashBoard)) return null;
     }
     return c;
   }
 
   _replan(sim) {
     this.stats.replans++;
+    this.holdingBoard = sim.power.board > 0;
     const root = cloneSim(sim, { window: this.window(), coins: this.coins });
     const base = this._opts();
     // Escalating search effort: cheap coarse search first, then finer input
@@ -461,7 +468,7 @@ export class Bot {
     if (this.tail) {
       this.tail.step(DT);
       this.tail.removed.length = 0;
-      if (!this.tail.alive || badEvents(this.tail, this.powers)) this.tail = null; // replan next frame
+      if (!this.tail.alive || badEvents(this.tail, this.powers, this.crashBoard)) this.tail = null; // replan next frame
     }
     return a;
   }
@@ -469,13 +476,13 @@ export class Bot {
 
 // Events that invalidate a plan: incidents, and (when avoiding power-ups) a
 // pickup the plan did not intend.
-function badEvents(c, powers) {
+function badEvents(c, powers, boardOk) {
   const ev = c.events;
   let bad = false;
   for (let i = 0; i < ev.length; i++) {
     if (ev[i].kind !== undefined) continue;
     const t = ev[i].type;
-    if (t === 'stumble' || t === 'boardBreak') bad = true;
+    if (t === 'stumble' || (t === 'boardBreak' && !boardOk)) bad = true;
     else if (t === 'power' && powers === 'avoid') bad = true;
   }
   ev.length = 0;

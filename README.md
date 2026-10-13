@@ -25,7 +25,23 @@ Open `index.html` in any modern browser. Double-clicking the file works, and so 
 
 ### Levels
 
-The bar at the top of the screen (at the bottom on phones) fills as you run. Every 500 m you go up a level, to a maximum of 10, and your score multiplier goes up with it. The 2x orb doubles it again.
+Every 500 m you go up a level, to a maximum of 10, and your score multiplier (shown next to your score) goes up with it. The 2x orb doubles it again.
+
+### Maps
+
+Pick a map from the **Map** button on the menu. The track plays the same everywhere; the world around it changes.
+
+| Map | Look |
+| --- | --- |
+| Downtown | sunny city blocks and graffiti walls |
+| Sunset Beach | beach houses, palm trees, the sea and an orange evening sky |
+| Frozen Peaks | snow-capped roofs, snowy pines and falling snow |
+| Neon Night | dark towers with glowing windows and neon signs |
+| Desert Canyon | red rock mesas and cacti |
+
+### Daily missions
+
+Every day brings three new missions, the same for everyone on that date, such as "Collect 70 coins in one run", "Roll 40 times" or "Collect 2 Jetpack orbs". Progress carries over between runs that day. Each finished mission pays coins straight away, finishing all three pays a 500-coin bonus, and new missions arrive at midnight. Check them from the **Missions** button on the menu.
 
 ### Power-up orbs
 
@@ -61,6 +77,8 @@ The code lives in `src/`:
 - `game.js`: rendering, animation, camera and game states
 - `models.js`, `world.js`, `textures.js`: procedurally built 3D models, scenery and textures
 - `characters.js`: the playable characters, their looks and prices
+- `maps.js`: map themes (sky, light, ground, buildings, props)
+- `missions.js`: daily mission picking, progress and rewards (tests: `node test/missions.mjs`)
 - `ui.js`, `input.js`, `audio.js`: HUD and menus, controls, synthesised sound
 
 Commit the rebuilt `game.js` along with any changes to `src/` so the game stays playable straight from the repository.

@@ -334,52 +334,6 @@ kbd {
   #over .small-btn, #pauseScreen .small-btn { margin: 0; padding: 12px 10px; }
 }
 
-/* ---------------- level progress bar */
-.level-box {
-  position: fixed;
-  left: 50%;
-  top: max(16px, env(safe-area-inset-top));
-  transform: translateX(-50%);
-  width: min(320px, 34vw);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(20, 33, 61, 0.72);
-  color: #fff;
-  font-size: 14px;
-  line-height: 1;
-  pointer-events: none;
-}
-.lbar {
-  flex: 1;
-  min-width: 0;
-  height: 12px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.22);
-  overflow: hidden;
-}
-.lbar div {
-  height: 100%;
-  width: 0;
-  border-radius: 6px;
-  background: linear-gradient(90deg, #38d66b, #ffd23f);
-  transition: width 0.2s linear;
-}
-.lv, .lv-next { flex: none; font-variant-numeric: tabular-nums; }
-.lv-next { color: #ffd23f; }
-
-@media (max-width: 640px) {
-  /* keep the character screen's buttons clear of the corner mute button */
-  .chars-screen { padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 62px); }
-  .level-box {
-    top: auto;
-    bottom: max(20px, env(safe-area-inset-bottom));
-    width: min(260px, 60vw);
-  }
-}
-
 /* ---------------- character screen */
 .chars-screen {
   align-items: flex-end;
@@ -408,7 +362,6 @@ kbd {
 #charAction.selected { background: #adb5bd; box-shadow: 0 6px 0 #868e96; }
 #charAction.locked { background: #f59f00; box-shadow: 0 6px 0 #b35c00; }
 #charAction.nudge { animation: nudge 0.4s; }
-#charsBtn { margin-bottom: 10px; }
 @keyframes nudge {
   0%, 100% { transform: translateX(0); }
   20% { transform: translateX(-8px); }
@@ -426,4 +379,71 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+@media (max-width: 640px) {
+  /* keep the bottom panels' buttons clear of the corner mute button */
+  .chars-screen { padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 62px); }
+}
+
+/* ---------------- menu tiles */
+.menu-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.tile-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 4px;
+  border-radius: 12px;
+  background: #e9ecef;
+  color: var(--ink);
+  box-shadow: 0 4px 0 #adb5bd;
+}
+.tile-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #adb5bd; }
+.t-label { font: 700 11px system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.06em; color: #868e96; }
+.t-value { font-size: 15px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mult.pop { animation: pop 0.35s ease-out; }
+
+/* ---------------- missions */
+.mission-list { list-style: none; margin: 4px 0 10px; padding: 0; display: grid; gap: 8px; text-align: left; }
+.mission {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  background: #f1f3f5;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.m-check {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid #ced4da;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 16px;
+}
+.mission.done .m-check { background: #38d66b; border-color: #38d66b; }
+.m-body { min-width: 0; }
+.m-text { font: 700 15px/1.25 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.mission.done .m-text { color: #868e96; text-decoration: line-through; }
+.m-bar { height: 8px; border-radius: 4px; background: #dee2e6; overflow: hidden; margin: 6px 0 3px; }
+.m-bar div { height: 100%; background: linear-gradient(90deg, #38d66b, #ffd23f); border-radius: 4px; }
+.m-meta { font: 600 12px system-ui, sans-serif; color: #868e96; font-variant-numeric: tabular-nums; }
+.m-reward { display: flex; align-items: center; gap: 4px; font-size: 16px; font-variant-numeric: tabular-nums; }
+.mission-bonus { margin: 0 0 4px; font: 600 14px system-ui, sans-serif; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.mission-bonus.done { color: #2f9e44; }
+.mission-reset { margin: 0 0 8px; font: 500 13px system-ui, sans-serif; color: #868e96; }
+.over-missions { margin: 0 0 8px; font: 600 13px system-ui, sans-serif; color: #495057; }
+
+@media (max-height: 520px) {
+  .menu-tiles { margin-bottom: 8px; }
+  .tile-btn { padding: 5px 4px; }
+  .mission { padding: 6px 10px; }
+  .mission-list { gap: 5px; }
+  #missionsScreen .panel { width: min(620px, 100%); }
+  .over-missions { grid-column: 1 / -1; margin-bottom: 4px; }
 }

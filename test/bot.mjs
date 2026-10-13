@@ -9,6 +9,12 @@
 //   node test/bot.mjs --seeds 1-50 --dist 4000 --variants safe,seek --workers 4
 //   node test/bot.mjs --seed 17 --variants seek --verbose     one seed, chatty
 //   node test/bot.mjs --json out.json      also write all per-run results as JSON
+//   node test/bot.mjs --static 2000        only the static generator scan (2000 seeds x 8000)
+//   node test/bot.mjs --selftest           check the harness itself (judge, clone isolation)
+//
+// Every run also does a static scan of the generator output (no simulation;
+// 300 seeds, or 2000 with --full, each to s=8000) for safe-lane violations and
+// misplaced items.
 //
 // Variants
 //   safe       bot avoids power-ups; mild preference for the generator's "safe lane"
@@ -19,6 +25,11 @@
 //   jetstress  like seek, but the harness also force-activates a jetpack every
 //              ~25 s (via Sim._activate) to test landings at random places
 //   jetcoins   coin-greedy with forced jetpacks: checks the sky coin trails
+//   deep       like safe, but the run starts at s=6000..9500 (top speed and
+//              difficulty) and goes 3000 m further (--dist = length, --start)
+//   deepseek   deep + seek
+//   boardcrash the harness hands the bot a board every ~12 s and the bot then
+//              deliberately crashes into something to exercise board + grace
 //
 // The bot only uses the public inputs left/right/jump/down, at most one per
 // 1/60 s frame, and steps the sim with step(1/60). It plans with lookahead
@@ -50,7 +61,7 @@ if (isMainThread && !process.env.BOT_SRC_DIR && !process.argv.includes('--live-s
 const {
   Sim, Bot, SafeLaneOracle, applyAction, DT, ACTION_NAMES, describeLayout, checkpoint, judge,
   itemFingerprint, search, rootFromCheckpoint, laneX, PLAYER, TRAIN, RAMP_L, HURDLE, OVERHEAD, trainFront,
-  surfaceHeight, hitBarrier, SRC_URL, cloneSim,
+  surfaceHeight, hitBarrier, SRC_URL, cloneSim, staticScan,
 } = await import('./bot-lib.mjs');
 
 const SELF = fileURLToPath(import.meta.url);
@@ -60,7 +71,7 @@ const SELF = fileURLToPath(import.meta.url);
 function parseArgs(argv) {
   const o = {
     seeds: null, dist: 6000, variants: null, workers: Math.max(1, os.cpus().length), full: false,
-    verbose: false, json: null, judge: true, maxMissedCoinChecks: 25,
+    verbose: false, json: null, judge: true, maxMissedCoinChecks: 25, staticSeeds: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -76,6 +87,8 @@ function parseArgs(argv) {
     else if (a === '--no-judge') o.judge = false;
     else if (a === '--live-src') { /* import ../src directly instead of a snapshot */ }
     else if (a === '--selftest') o.selftest = true;
+    else if (a === '--static') o.staticSeeds = Number(next());
+    else if (a === '--start') o.start = Number(next());
     else if (a === '--help' || a === '-h') { console.log(fs.readFileSync(SELF, 'utf8').split('\n').slice(1, 30).join('\n')); process.exit(0); }
     else throw new Error(`unknown argument ${a}`);
   }
@@ -97,7 +110,12 @@ function buildJobs(o) {
   if (o.seeds || o.variants) {
     const seeds = o.seeds || range(1, 24);
     const variants = o.variants || ['safe', 'seek'];
-    for (const v of variants) for (const s of seeds) jobs.push({ seed: s, variant: v, dist: o.dist });
+    for (const v of variants) {
+      for (const s of seeds) {
+        if (v === 'deep' || v === 'deepseek') jobs.push({ seed: s, variant: v, start: o.start ?? 6000 + 500 * (s % 8), dist: (o.start ?? 6000 + 500 * (s % 8)) + o.dist });
+        else jobs.push({ seed: s, variant: v, dist: o.dist });
+      }
+    }
     return jobs;
   }
   if (o.full) {
@@ -107,6 +125,9 @@ function buildJobs(o) {
     for (const s of range(3001, 3040)) jobs.push({ seed: s, variant: 'jetstress', dist: o.dist });
     for (const s of range(4001, 4012)) jobs.push({ seed: s, variant: 'coins', dist: 3000 });
     for (const s of range(5001, 5004)) jobs.push({ seed: s, variant: 'jetcoins', dist: 3000 });
+    for (const s of range(6001, 6100)) jobs.push({ seed: s, variant: 'deep', start: 6000 + 500 * (s % 8), dist: 9000 + 500 * (s % 8) });
+    for (const s of range(7001, 7100)) jobs.push({ seed: s, variant: 'deepseek', start: 6000 + 500 * (s % 8), dist: 9000 + 500 * (s % 8) });
+    for (const s of range(8001, 8030)) jobs.push({ seed: s, variant: 'boardcrash', dist: o.dist });
     return jobs;
   }
   for (const s of range(1, 24)) jobs.push({ seed: s, variant: 'safe', dist: o.dist });
@@ -128,20 +149,50 @@ function variantBot(variant, oracle) {
     case 'blind': return new Bot({ oracle: null, powers: 'ignore', horizon: 180 });
     case 'coins': return new Bot({ oracle, powers: 'avoid', coins: true });
     case 'jetcoins': return new Bot({ oracle, powers: 'ignore', coins: true });
+    case 'deep': return new Bot({ oracle, powers: 'avoid' });
+    case 'boardcrash': return new Bot({ oracle, powers: 'seek', crashBoard: true });
+    case 'deepseek': return new Bot({ oracle, powers: 'seek' });
     default: throw new Error(`unknown variant ${variant}`);
   }
+}
+
+// "deep" runs start far down the track (speed and difficulty maxed out) to get
+// more coverage of the endless plateau per CPU second. Setup only: the run is
+// placed just after a generator row, in that row's safe lane, on clear ground;
+// from then on the bot plays normally through the public inputs.
+function deepStart(sim, oracle, target) {
+  oracle.ensure(target + 400);
+  for (const r of oracle.rows) {
+    if (r.s < target) continue;
+    const s0 = r.s + 1.0;
+    const L = r.safe;
+    const probe = new Sim(sim.seed);
+    probe.s = s0; probe.lane = L; probe.x = laneX(L);
+    probe._generate(); probe._cleanup();
+    const ground = surfaceHeight(probe.trains, laneX(L), s0, PLAYER.halfW, PLAYER.halfD, s0);
+    const wall = probe.trains.some((t) => t.lane === L && trainFront(t, s0) > s0 - 1 && trainFront(t, s0) < s0 + 15);
+    const bar = probe.barriers.some((b) => b.lane === L && Math.abs(b.s - s0) < 4);
+    if (ground === 0 && !wall && !bar) {
+      sim.s = s0; sim.lane = L; sim.x = laneX(L);
+      sim._generate(); sim._cleanup();
+      sim.added.length = 0; sim.removed.length = 0; sim.takeEvents();
+      return s0;
+    }
+  }
+  throw new Error('no deep start found');
 }
 
 export function runOne(job, log = () => {}) {
   const { seed, variant, dist } = job;
   const sim = new Sim(seed);
   const oracle = new SafeLaneOracle(seed);
+  if (job.start) job.startS = deepStart(sim, oracle, job.start);
   const bot = variantBot(variant, oracle);
   const t0 = Date.now();
   const actions = [];
   const cps = [];
   const R = {
-    seed, variant, dist, alive: true, s: 0, frames: 0, deathCause: null, deathFrame: null, ms: 0,
+    seed, variant, dist, startS: job.startS || 0, alive: true, s: 0, frames: 0, deathCause: null, deathFrame: null, ms: 0,
     deaths: [], incidents: [], bugs: [], anomalies: [], powers: {}, powerEnds: {}, jetLandings: 0,
     maxLen: { trains: 0, barriers: 0, coinItems: 0, powers: 0, recentTrains: 0 }, lenAt: {},
     events: {}, landPairsClose: 0, multiEventFrames: {}, coinsMissed: [], coinsUnreachable: [], coinGeo: [],
@@ -153,9 +204,9 @@ export function runOne(job, log = () => {}) {
     else R.anomalies.find((a) => a.type === type).count = (R.anomalies.find((a) => a.type === type).count || 5) + 1;
   };
 
-  let prevScore = 0;
-  let prevCoins = 0;
-  let prevS = 0;
+  let prevScore = sim.score;
+  let prevCoins = sim.coins;
+  let prevS = sim.s;
   let lastLandFrame = -1000;
   let lastJumpFrame = -1000;
   let nextJet = 25 * 60;
@@ -163,6 +214,7 @@ export function runOne(job, log = () => {}) {
   const passed = new Set();
   let coinChecks = 0;
   const pendingIncidents = [];
+  const smashedSeen = new Set();
   const jetFrames = [];
   const liveTrains = new Map(); // id -> train (for placement checks)
   let fingerprintChecks = 0;
@@ -210,11 +262,31 @@ export function runOne(job, log = () => {}) {
     }
   };
 
+  // added/removed contract (what the renderer relies on): every live item is
+  // announced in `added` exactly once, and leaves through `removed` exactly once
+  // after it has gone from the live arrays.
+  const addedIds = new Set();
+  const removedIds = new Set();
+  const isLive = (it) => {
+    const arr = it.kind === 'train' ? sim.trains : it.kind === 'coin' ? sim.coinItems : it.kind === 'power' ? sim.powers : sim.barriers;
+    return arr.includes(it);
+  };
+  for (const arr of [sim.trains, sim.barriers, sim.coinItems, sim.powers]) for (const it of arr) if (!sim.added.includes(it)) addedIds.add(it.id);
   const checkAdded = () => {
     // trains first so coins generated in the same batch see them
     const add = sim.added;
     for (const it of add) if (it.kind === 'train') placementCheck(it);
     for (const it of add) if (it.kind !== 'train') placementCheck(it);
+    for (const it of add) {
+      if (addedIds.has(it.id)) anomaly('added-twice', { id: it.id, kind: it.kind });
+      addedIds.add(it.id);
+    }
+    for (const it of sim.removed) {
+      if (!addedIds.has(it.id)) anomaly('removed-but-never-added', { id: it.id, kind: it.kind });
+      if (removedIds.has(it.id)) anomaly('removed-twice', { id: it.id, kind: it.kind });
+      removedIds.add(it.id);
+      if (isLive(it)) anomaly('removed-but-still-live', { id: it.id, kind: it.kind });
+    }
     sim.added.length = 0;
     sim.removed.length = 0;
   };
@@ -226,6 +298,11 @@ export function runOne(job, log = () => {}) {
     if (frame % 30 === 0) {
       cps.push(checkpoint(sim, frame));
       if (cps.length > 26) cps.shift();
+    }
+    if (variant === 'boardcrash' && frame >= nextJet && sim.power.board <= 0 && sim.graceT <= 0 && !sim.flying) {
+      sim._activate('board'); // synthetic: same code path as a pickup
+      nextJet = frame + 12 * 60;
+      bot.tail = null;
     }
     if ((variant === 'jetstress' || variant === 'jetcoins') && frame >= nextJet && sim.power.jetpack <= 0 && sim.graceT <= 0) {
       sim._activate('jetpack'); // synthetic: same code path as a pickup
@@ -265,6 +342,17 @@ export function runOne(job, log = () => {}) {
       if (e.type === 'jump') lastJumpFrame = R.frames;
       if (e.type === 'stumble' || e.type === 'boardBreak') {
         const inc = { type: e.type, frame: R.frames, s: +sim.s.toFixed(2), lane: sim.lane, x: +sim.x.toFixed(2), y: +sim.y.toFixed(2) };
+        if (variant === 'boardcrash' && e.type === 'boardBreak') {
+          R.boardCrashes = (R.boardCrashes || 0) + 1;
+          const smashed = sim.barriers.some((b) => b.smashed && !smashedSeen.has(b.id));
+          for (const b of sim.barriers) if (b.smashed) smashedSeen.add(b.id);
+          const kind = smashed ? 'barrier' : per.stumble ? 'side' : 'train';
+          R.crashKinds = R.crashKinds || {};
+          R.crashKinds[kind] = (R.crashKinds[kind] || 0) + 1;
+          if (kind === 'train' && Math.abs(sim.y - TRAIN.height) > 0.6 && sim.y < TRAIN.height - 0.6) anomaly('board-train-crash-not-on-roof', { y: sim.y });
+          if (sim.graceT <= 0) anomaly('board-break-without-grace', {});
+          continue;
+        }
         R.incidents.push(inc);
         pendingIncidents.push({ inc, cps: cps.slice(), due: R.frames + 2 });
       }
@@ -340,6 +428,12 @@ export function runOne(job, log = () => {}) {
       for (const c of sim.coinItems) if (c.s < sim.s - 60) stale++;
       for (const p of sim.powers) if (p.s < sim.s - 60) stale++;
       if (stale) anomaly('stale-items', { stale });
+      for (const arr of [sim.trains, sim.barriers, sim.coinItems, sim.powers]) {
+        for (const it of arr) {
+          if (!addedIds.has(it.id)) anomaly('live-but-never-added', { id: it.id, kind: it.kind });
+          if (removedIds.has(it.id)) anomaly('live-after-removed', { id: it.id, kind: it.kind });
+        }
+      }
       R.lenAt[Math.round(sim.s)] = sim.trains.length + sim.barriers.length + sim.coinItems.length + sim.powers.length;
     }
 
@@ -474,15 +568,20 @@ function coinReachable(job, cps, c) {
   if (!cp) return { ok: null, how: 'no-checkpoint' };
   const root = rootFromCheckpoint(cp, job.seed, c.s + 120);
   const H = framesToCoin(cp.frame) + 10;
-  const r = search(root, {
-    horizon: H, every: 1, beam: 4000, allowStumble: true, allowBoard: true,
-    goal: (s) => { for (const k of s.coinItems) if (k.id === id) return false; return true; },
-  });
-  if (!r.ok || !r.end) return { ok: false, context: coinContext(root, c) };
+  const goal = (q) => { for (const k of q.coinItems) if (k.id === id) return false; return true; };
+  // stage A: coarse keys; stage B: fine keys (as in the death judge)
+  let r = null;
+  let stage = 'A';
+  for (const st of [{ beam: 4000, fine: false, name: 'A' }, { beam: 20000, fine: true, name: 'B' }]) {
+    stage = st.name;
+    r = search(root, { horizon: H, every: 1, beam: st.beam, fine: st.fine, allowStumble: true, allowBoard: true, goal });
+    if (r.ok) break;
+  }
+  if (!r.ok || !r.end) return { ok: false, how: `search ${stage}`, context: coinContext(root, c) };
   // must also be able to live on for a second afterwards
   const after = search(r.end, { horizon: 60, every: 2, beam: 2000, allowStumble: true, allowBoard: true });
-  if (!after.ok) return { ok: false, context: coinContext(root, c) + ' (collectable only on a fatal path)' };
-  return { ok: true, how: 'search' };
+  if (!after.ok) return { ok: false, how: 'fatal', context: coinContext(root, c) + ' (collectable only on a fatal path)' };
+  return { ok: true, how: `search ${stage}` };
 }
 
 function coinContext(root, c) {
@@ -515,6 +614,39 @@ function frameRateProbe() {
     out.push({ dt: +dt.toFixed(4), apex: +apex.toFixed(4), airtime: landed && +landed.toFixed(4), dist: +(sim.s - s0).toFixed(3) });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// static generator scan
+function runStatic(n, dist) {
+  const t0 = Date.now();
+  const agg = {};
+  const ex = {};
+  const after = {};
+  let rows = 0, items = 0;
+  for (let seed = 1; seed <= n; seed++) {
+    const r = staticScan(seed, dist);
+    rows += r.rows; items += r.items;
+    for (const i of r.issues) {
+      agg[i.type] = (agg[i.type] || 0) + 1;
+      if (!ex[i.type]) ex[i.type] = i;
+      if (i.type === 'coin-just-below-roof-end') { const b = i.after < 1 ? '<1.0' : '1.0-2.0'; after[b] = (after[b] || 0) + 1; }
+    }
+  }
+  return { n, dist, rows, items, agg, ex, after, ms: Date.now() - t0 };
+}
+
+const STATIC_WARN = new Set(['coin-just-below-roof-end']);
+function reportStatic(r) {
+  console.log(`\n[static] generator scan: ${r.n} seeds x ${r.dist} m, ${r.rows} rows, ${r.items} items, ${(r.ms / 1000).toFixed(1)} s`);
+  let failed = false;
+  if (!Object.keys(r.agg).length) console.log('  no issues');
+  for (const [t, n] of Object.entries(r.agg)) {
+    const warn = STATIC_WARN.has(t);
+    if (!warn) failed = true;
+    console.log(`  ${warn ? 'WARNING' : 'VIOLATION'} ${t}: ${n}${t === 'coin-just-below-roof-end' ? ' ' + JSON.stringify(r.after) : ''}; e.g. ${JSON.stringify(r.ex[t])}`);
+  }
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +722,7 @@ if (!isMainThread) {
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   if (o.selftest) process.exit(selftest() ? 0 : 1);
+  if (o.staticSeeds && !o.seeds && !o.variants && !o.full) process.exit(reportStatic(runStatic(o.staticSeeds, 8000)) ? 1 : 0);
   const jobs = buildJobs(o);
   const t0 = Date.now();
   const md5 = await srcFingerprint();
@@ -621,7 +754,10 @@ async function main() {
     };
     for (let i = 0; i < Math.min(o.workers, jobs.length); i++) spawn();
   });
+  const staticRes = runStatic(o.staticSeeds || (o.full ? 2000 : 300), 8000);
   const summary = report(results, o, Date.now() - t0);
+  if (reportStatic(staticRes)) summary.failed = true;
+  console.log(summary.failed ? '\nRESULT: problems found (see above)' : '\nRESULT: no game bugs found');
   if (o.json) fs.writeFileSync(o.json, JSON.stringify({ src: md5, results, summary }, null, 1));
   process.exit(summary.failed ? 1 : 0);
 }
@@ -642,14 +778,15 @@ function report(results, o, ms) {
     const errs = rs.filter((r) => r.error);
     const ok = rs.filter((r) => !r.error);
     const dead = ok.filter((r) => !r.alive);
-    const dist = ok.reduce((a, r) => a + r.s, 0);
+    const dist = ok.reduce((a, r) => a + r.s - (r.startS || 0), 0);
     const pw = {};
     for (const r of ok) for (const k in r.powers) pw[k] = (pw[k] || 0) + r.powers[k];
     const jet = ok.reduce((a, r) => a + r.jetLandings, 0);
     const inc = ok.reduce((a, r) => a + r.incidents.length, 0);
     console.log(`\n[${v}] runs=${rs.length} errors=${errs.length} deaths=${dead.length} total distance=${dist.toFixed(0)} ` +
       `min/max s=${Math.min(...ok.map((r) => r.s)).toFixed(0)}/${Math.max(...ok.map((r) => r.s)).toFixed(0)}`);
-    console.log(`  power pickups ${JSON.stringify(pw)} jetpack landings=${jet} incidents(stumble/board)=${inc}`);
+    console.log(`  power pickups ${JSON.stringify(pw)} jetpack landings=${jet} incidents(stumble/board)=${inc}` +
+      (v === 'boardcrash' ? ` deliberate board crashes=${ok.reduce((a, r) => a + (r.boardCrashes || 0), 0)} by kind ${JSON.stringify(ok.reduce((a, r) => { for (const k in r.crashKinds || {}) a[k] = (a[k] || 0) + r.crashKinds[k]; return a; }, {}))}` : ''));
     const offSafe = ok.reduce((a, r) => a + r.offSafeFrames, 0), frames = ok.reduce((a, r) => a + r.frames, 0);
     console.log(`  frames=${frames} off-safe-lane=${(100 * offSafe / Math.max(1, frames)).toFixed(1)}% replans=${ok.reduce((a, r) => a + r.bot.replans, 0)} predictedDeaths=${ok.reduce((a, r) => a + r.bot.predictedDeath, 0)}`);
     for (const r of dead) {
@@ -707,6 +844,5 @@ function report(results, o, ms) {
     if (ok.some((r) => r.incidents.some((i) => i.verdict && i.verdict.startsWith('UNAVOIDABLE')))) failed = true;
   }
   console.log('\nframe-rate probe (single jump):', JSON.stringify(frameRateProbe()));
-  console.log(failed ? '\nRESULT: problems found (see above)' : '\nRESULT: no game bugs found');
   return { failed };
 }

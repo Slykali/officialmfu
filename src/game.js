@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
-  laneX, ROLL_TIME, MAGNET_RANGE, POWER_TIME, POWER_TYPES, PLAYER, MAX_LEVEL,
+  laneX, ROLL_TIME, MAGNET_RANGE, POWER_TIME, POWER_TYPES, PLAYER, TRAIN,
 } from './config.js';
 import { Sim } from './sim.js';
 import { trainFront, surfaceHeight } from './physics.js';
@@ -12,6 +12,8 @@ import {
 } from './models.js';
 import { skyTexture } from './textures.js';
 import { CHARACTERS, characterById } from './characters.js';
+import { MAPS, mapById } from './maps.js';
+import { Missions } from './missions.js';
 
 const POWER_LABEL = {
   magnet: 'Coin Magnet', multiplier: '2x Score', sneakers: 'Super Sneakers', jetpack: 'Jetpack', board: 'Hoverboard',
@@ -52,6 +54,10 @@ export class Game {
     this.charId = characterById(load('sr2-char', CHARACTERS[0].id)).id;
     if (!this.owned.has(this.charId)) this.charId = CHARACTERS[0].id;
     this.previewIndex = 0;
+    this.mapId = mapById(load('sr2-map', MAPS[0].id)).id;
+    this.mapIndex = 0;
+    this.skies = new Map();
+    this.missions = new Missions();
 
     const lowEnd = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
       || Math.min(window.screen?.width || 1000, window.screen?.height || 1000) < 600;
@@ -71,7 +77,6 @@ export class Game {
     });
 
     const scene = new THREE.Scene();
-    scene.background = skyTexture();
     scene.fog = new THREE.Fog('#cfe9ff', 70, 230);
     // soft reflections so metal (rails, coins) doesn't render nearly black
     const pmrem = new THREE.PMREMGenerator(renderer);
@@ -81,7 +86,8 @@ export class Game {
     this.scene = scene;
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 300);
-    scene.add(new THREE.HemisphereLight('#dbeeff', '#6b5b4b', 1.3));
+    this.hemi = new THREE.HemisphereLight('#dbeeff', '#6b5b4b', 1.3);
+    scene.add(this.hemi);
     const sun = new THREE.DirectionalLight('#fff1d6', 2.4);
     sun.castShadow = true;
     sun.shadow.mapSize.set(lowEnd ? 1024 : 2048, lowEnd ? 1024 : 2048);
@@ -94,6 +100,7 @@ export class Game {
     this.sun = sun;
 
     this.world = new World(scene);
+    this._applyMap(this.mapId);
     this.runner = null;
     this._setRunnerLook(this.charId);
     this.guard = makeGuard();
@@ -136,6 +143,7 @@ export class Game {
   // ------------------------------------------------------------- state
   start() {
     if (this.state === 'chars') this._setRunnerLook(this.charId);
+    if (this.state === 'maps') this._applyMap(this.mapId);
     this.audio.unlock();
     this._clearViews();
     this.sim.reset();
@@ -147,6 +155,9 @@ export class Game {
     this.guardGap = this._guardBase(); // the guard and dog start right behind and fall back
     this.camY = 0;
     this.deathT = 0;
+    this.missions.startRun();
+    this.lastS = 0;
+    this.cleanFrom = 0;
     this.state = 'playing';
     this.ui.showHud();
     this.audio.startMusic();
@@ -158,6 +169,7 @@ export class Game {
     if (this.state !== 'playing' && this.state !== 'countdown') return;
     this.state = 'paused';
     this.audio.stopMusic();
+    this.missions.save();
     this.ui.showPause();
   }
 
@@ -171,8 +183,12 @@ export class Game {
 
   toMenu() {
     // quitting a run part-way still keeps its coins and score
-    if (this.state === 'paused' || this.state === 'countdown') this._saveRun();
+    if (this.state === 'paused' || this.state === 'countdown') {
+      this._saveRun();
+      this._missionsDone(this.missions.endRun());
+    }
     if (this.state === 'chars') this._setRunnerLook(this.charId);
+    if (this.state === 'maps') this._applyMap(this.mapId);
     this.audio.stopMusic();
     this._clearViews();
     this.sim.reset();
@@ -185,7 +201,7 @@ export class Game {
   }
 
   togglePause() {
-    if (this.state === 'chars') this.toMenu();
+    if (this.state === 'chars' || this.state === 'maps' || this.state === 'missions') this.toMenu();
     else if (this.state === 'paused') this.resume();
     else this.pause();
   }
@@ -195,6 +211,8 @@ export class Game {
     else if (this.state === 'paused') this.resume();
     else if (this.state === 'over' && this.time - this.overAt > 0.6) this.start();
     else if (this.state === 'chars') this.charsAction();
+    else if (this.state === 'maps') this.mapsAction();
+    else if (this.state === 'missions') this.toMenu();
   }
 
   act(name) {
@@ -203,7 +221,12 @@ export class Game {
   }
 
   _menuInfo() {
-    return { best: this.best, bank: this.bank, character: characterById(this.charId).name };
+    this.missions.refresh();
+    const done = this.missions.state.done.filter(Boolean).length;
+    return {
+      best: this.best, bank: this.bank, character: characterById(this.charId).name, map: mapById(this.mapId).name,
+      missions: `${done}/3`,
+    };
   }
 
   _saveRun() {
@@ -223,9 +246,11 @@ export class Game {
     this.overAt = this.time;
     const { score, newBest } = this._saveRun();
     if (newBest) this.audio.play('record');
+    this._missionsDone(this.missions.endRun());
     this.ui.showOver({
       score, coins: this.sim.coins, best: this.best, newBest,
       cause: DEATH_TEXT[this.sim.deathCause] || '', distance: Math.floor(this.sim.s), level: this.sim.level,
+      missions: this.missions.state.done.filter(Boolean).length,
     });
   }
 
@@ -286,6 +311,96 @@ export class Game {
       name: c.name, tagline: c.tagline, price: c.price, owned: this.owned.has(c.id), selected: this.charId === c.id,
       bank: this.bank, index: this.previewIndex, total: CHARACTERS.length,
     });
+  }
+
+  // ------------------------------------------------------------- maps
+  _applyMap(id) {
+    const m = mapById(id);
+    this.world.applyTheme(m);
+    let sky = this.skies.get(m.id);
+    if (!sky) {
+      sky = skyTexture(m.sky);
+      this.skies.set(m.id, sky);
+    }
+    this.scene.background = sky;
+    this.scene.fog.color.set(m.fog[0]);
+    this.scene.fog.near = m.fog[1];
+    this.scene.fog.far = m.fog[2];
+    this.hemi.color.set(m.hemi[0]);
+    this.hemi.groundColor.set(m.hemi[1]);
+    this.hemi.intensity = m.hemi[2];
+    this.sun.color.set(m.sun[0]);
+    this.sun.intensity = m.sun[1];
+    this.scene.environmentIntensity = m.env;
+    this.renderer.toneMappingExposure = m.exposure;
+    this.shownMap = m.id;
+  }
+
+  openMaps() {
+    if (this.state !== 'menu') return;
+    this.audio.unlock();
+    this.audio.play('click');
+    this.state = 'maps';
+    this.mapIndex = Math.max(0, MAPS.findIndex((m) => m.id === this.mapId));
+    this._showMap();
+  }
+
+  mapsStep(dir) {
+    if (this.state !== 'maps') return;
+    const n = MAPS.length;
+    this.mapIndex = (this.mapIndex + dir + n) % n;
+    this.audio.play('lane');
+    this._showMap();
+  }
+
+  mapsAction() {
+    if (this.state !== 'maps') return;
+    const m = MAPS[this.mapIndex];
+    if (this.mapId !== m.id) {
+      this.mapId = m.id;
+      save('sr2-map', m.id);
+      this.audio.play('power');
+    }
+    this._showMap();
+  }
+
+  _showMap() {
+    const m = MAPS[this.mapIndex];
+    if (this.shownMap !== m.id) this._applyMap(m.id);
+    this.ui.showMaps({
+      name: m.name, tagline: m.tagline, selected: this.mapId === m.id, index: this.mapIndex, total: MAPS.length,
+    });
+  }
+
+  // ------------------------------------------------------------- missions
+  openMissions() {
+    if (this.state !== 'menu') return;
+    this.audio.unlock();
+    this.audio.play('click');
+    this.missions.refresh();
+    this.state = 'missions';
+    this.ui.showMissions(this.missions.view());
+  }
+
+  _missionsDone(list) {
+    for (const d of list) {
+      this.bank += d.reward;
+      save('sr2-coins', this.bank);
+      this.audio.play('record');
+      this.ui.toast(d.bonus ? `All missions done! +${d.reward}` : `Mission complete! +${d.reward}`);
+    }
+  }
+
+  _trackMissions() {
+    const sim = this.sim;
+    const ds = Math.max(0, sim.s - this.lastS);
+    this.lastS = sim.s;
+    const m = this.missions;
+    this._missionsDone(m.add('meters', ds));
+    if (sim.grounded && sim.y >= TRAIN.height - 0.05) this._missionsDone(m.add('roof', ds));
+    this._missionsDone(m.runStats({
+      coins: sim.coins, distance: sim.s, score: sim.score, level: sim.level, clean: sim.s - this.cleanFrom,
+    }));
   }
 
   // ------------------------------------------------------------- views
@@ -416,6 +531,7 @@ export class Game {
     if (this.state === 'playing') {
       sim.step(dt);
       this._handleEvents(sim.takeEvents());
+      this._trackMissions();
       if (!sim.alive) {
         this.state = 'dying';
         this.deathT = 0;
@@ -445,7 +561,7 @@ export class Game {
     }
     this._syncAdded();
     this._updateViews(dt);
-    this.world.update(sim.s);
+    this.world.update(sim.s, dt);
     this._animateRunner(dt);
     this._animateChasers(dt);
     this._updateCamera(dt);
@@ -455,12 +571,22 @@ export class Game {
   _handleEvents(events) {
     for (const e of events) {
       switch (e.type) {
-        case 'coin': this.audio.play('coin'); break;
-        case 'jump': this.audio.play(e.super ? 'superjump' : 'jump'); break;
-        case 'roll': this.audio.play('roll'); break;
+        case 'coin':
+          this.audio.play('coin');
+          this._missionsDone(this.missions.add('coin'));
+          break;
+        case 'jump':
+          this.audio.play(e.super ? 'superjump' : 'jump');
+          this._missionsDone(this.missions.add('jump'));
+          break;
+        case 'roll':
+          this.audio.play('roll');
+          this._missionsDone(this.missions.add('roll'));
+          break;
         case 'lane': this.audio.play('lane'); break;
         case 'land': if (e.hard) this.audio.play('land'); break;
         case 'stumble':
+          this.cleanFrom = this.sim.s;
           this.audio.play('stumble');
           this.audio.play('bark');
           this.shake = 0.35;
@@ -471,6 +597,7 @@ export class Game {
         case 'power': {
           this.audio.play('power');
           this.ui.toast(POWER_LABEL[e.power] + '!');
+          this._missionsDone(this.missions.add('orb', 1, e.power));
           const burst = makeBurst(e.power);
           this.scene.add(burst);
           this.bursts.push({ obj: burst, t: 0 });
@@ -483,8 +610,8 @@ export class Game {
           this.ui.toast('Hoverboard saved you!');
           break;
         case 'level':
+          // levels run quietly in the background: a chime and the multiplier ticks up
           this.audio.play('level');
-          this.ui.toast(e.level >= MAX_LEVEL ? `Max level! x${e.level}` : `Level ${e.level}! x${e.level}`);
           break;
         default: break;
       }
@@ -500,7 +627,7 @@ export class Game {
     root.position.set(sim.x, sim.y, -sim.s);
     const running = this.state === 'playing' || dying;
     const boardOn = sim.power.board > 0;
-    r.board.visible = boardOn && !sim.flying && this.state !== 'menu' && this.state !== 'chars';
+    r.board.visible = boardOn && !sim.flying && running;
     r.jetpack.visible = sim.flying;
     const lift = r.board.visible ? 0.12 : 0;
     r.body.position.y = -0.9 + lift;
@@ -610,13 +737,14 @@ export class Game {
     const d = this.dog;
     const base = this._guardBase();
     let target = 30;
-    if (this.state === 'menu' || this.state === 'chars') target = 30;
+    if (this.state === 'menu' || this.state === 'chars' || this.state === 'maps' || this.state === 'missions') target = 30;
     else if (this.state === 'dying' || this.state === 'over') target = 2.4;
     else if (sim.stumbleT > 0) target = base;
     else if (sim.time < 1.8) target = base; // intro: starts right behind, then falls back
     const rate = target < this.guardGap ? 3 : 0.9;
     this.guardGap += (target - this.guardGap) * Math.min(1, dt * rate);
-    const visible = this.guardGap < 16 && this.state !== 'menu' && this.state !== 'chars';
+    const visible = this.guardGap < 16 && (this.state === 'playing' || this.state === 'paused' || this.state === 'countdown'
+      || this.state === 'dying' || this.state === 'over');
     const moving = this.state === 'playing' || this.guardGap - target > 0.05;
     const caught = (this.state === 'dying' || this.state === 'over') && !moving;
 
@@ -683,6 +811,12 @@ export class Game {
       cam.lookAt(sim.x, 1.0 - dist * 0.17, z);
       return;
     }
+    if (this.state === 'maps') {
+      // a wider, higher view so the scenery shows
+      cam.position.set(0, 6.5, z + Math.max(10, back + 3));
+      cam.lookAt(0, 2.5, z - 40);
+      return;
+    }
     const focusY = sim.flying ? sim.y - 1.5 : (this.state === 'dying' || this.state === 'over') ? this.deathY : sim.y;
     this.camY += (focusY - this.camY) * Math.min(1, dt * (focusY < this.camY ? 7 : 4));
     let sx = 0;
@@ -706,7 +840,7 @@ export class Game {
     for (const p of POWER_TYPES) {
       if (sim.power[p] > 0) powers.push({ type: p, frac: sim.power[p] / POWER_TIME[p] });
     }
-    this.ui.updateHud(Math.floor(sim.score), sim.coins, sim.multiplier, powers, sim.level, sim.levelProgress, MAX_LEVEL);
+    this.ui.updateHud(Math.floor(sim.score), sim.coins, sim.multiplier, powers, sim.power.multiplier > 0);
   }
 
   _resize() {

@@ -14,7 +14,10 @@ export class UI {
       overDist: $('overDist'), overCause: $('overCause'), newBest: $('newBest'), mute: $('muteBtn'),
       charMenu: $('charMenu'), chars: $('chars'), charName: $('charName'), charTag: $('charTag'),
       charDots: $('charDots'), charAction: $('charAction'), charsBank: $('charsBank'),
-      levelLabel: $('levelLabel'), levelFill: $('levelFill'), levelNext: $('levelNext'),
+      mapMenu: $('mapMenu'), missionsMenu: $('missionsMenu'), maps: $('maps'), mapName: $('mapName'),
+      mapTag: $('mapTag'), mapDots: $('mapDots'), mapAction: $('mapAction'), missions: $('missionsScreen'),
+      missionList: $('missionList'), missionReset: $('missionReset'), missionBonus: $('missionBonus'),
+      overMissions: $('overMissions'),
     };
     const bind = (id, fn) => {
       $(id).addEventListener('click', (e) => {
@@ -35,6 +38,13 @@ export class UI {
     bind('charNext', () => handlers.charStep(1));
     bind('charAction', handlers.charAction);
     bind('charBack', handlers.menu);
+    bind('mapsBtn', handlers.maps);
+    bind('mapPrev', () => handlers.mapStep(-1));
+    bind('mapNext', () => handlers.mapStep(1));
+    bind('mapAction', handlers.mapAction);
+    bind('mapBack', handlers.menu);
+    bind('missionsBtn', handlers.missions);
+    bind('missionsBack', handlers.menu);
 
     // power-up icons for the HUD
     this.icons = {};
@@ -46,21 +56,62 @@ export class UI {
       }
     }
     this.powerRows = {};
-    this.last = { score: -1, coins: -1, mult: -1, level: -1, fill: -1 };
+    this.last = { score: -1, coins: -1, mult: -1 };
+    this.toasts = [];
     this.toastTimer = null;
   }
 
   _only(screen) {
-    for (const k of ['menu', 'pause', 'over', 'chars']) this.el[k].classList.toggle('hidden', k !== screen);
+    for (const k of ['menu', 'pause', 'over', 'chars', 'maps', 'missions']) this.el[k].classList.toggle('hidden', k !== screen);
     this.el.countdown.classList.add('hidden');
   }
 
-  showMenu({ best, bank, character }) {
+  showMenu({ best, bank, character, map, missions }) {
     this._only('menu');
     this.el.hud.classList.add('hidden');
     this.el.bestMenu.textContent = best.toLocaleString();
     this.el.bankMenu.textContent = bank.toLocaleString();
     this.el.charMenu.textContent = character;
+    this.el.mapMenu.textContent = map;
+    this.el.missionsMenu.textContent = missions;
+  }
+
+  showMaps(m) {
+    this._only('maps');
+    this.el.hud.classList.add('hidden');
+    this.el.mapName.textContent = m.name;
+    this.el.mapTag.textContent = m.tagline;
+    const btn = this.el.mapAction;
+    btn.textContent = m.selected ? 'SELECTED' : 'SELECT';
+    btn.classList.toggle('selected', m.selected);
+    btn.setAttribute('aria-label', m.selected ? `${m.name} is selected` : `Select ${m.name}`);
+    let dots = '';
+    for (let i = 0; i < m.total; i++) dots += `<i class="${i === m.index ? 'on' : ''}"></i>`;
+    this.el.mapDots.innerHTML = dots;
+  }
+
+  showMissions(v) {
+    this._only('missions');
+    this.el.hud.classList.add('hidden');
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    this.el.missionList.innerHTML = v.missions.map((m) => {
+      const pct = Math.round((m.progress / m.target) * 100);
+      const note = m.scope === 'run' && !m.done ? 'best run' : '';
+      return `<li class="mission${m.done ? ' done' : ''}">
+        <div class="m-check" aria-hidden="true">${m.done ? '&#10003;' : ''}</div>
+        <div class="m-body">
+          <div class="m-text">${esc(m.text)}</div>
+          <div class="m-bar"><div style="width:${pct}%"></div></div>
+          <div class="m-meta">${m.done ? 'Complete' : `${m.progress.toLocaleString()} / ${m.target.toLocaleString()}${note ? ` · ${note}` : ''}`}</div>
+        </div>
+        <div class="m-reward"><span class="coin-icon small"></span>${m.reward}</div>
+      </li>`;
+    }).join('');
+    this.el.missionBonus.classList.toggle('done', v.bonusDone);
+    this.el.missionBonus.innerHTML = `${v.bonusDone ? '&#10003; ' : ''}Finish all three for a bonus <span class="coin-icon small"></span> <b>${v.bonus}</b>`;
+    const mins = Math.max(1, Math.ceil(v.resetIn / 60000));
+    const h = Math.floor(mins / 60);
+    this.el.missionReset.textContent = `New missions in ${h ? `${h} h ` : ''}${mins % 60} min`;
   }
 
   showChars(c) {
@@ -118,6 +169,7 @@ export class UI {
     this.el.overDist.textContent = `${r.distance.toLocaleString()} m`;
     this.el.overCause.textContent = r.cause;
     this.el.newBest.classList.toggle('hidden', !r.newBest);
+    this.el.overMissions.textContent = `Daily missions: ${r.missions} of 3 done`;
   }
 
   setMuted(m) {
@@ -126,17 +178,7 @@ export class UI {
     this.el.mute.title = m ? 'Unmute (M)' : 'Mute (M)';
   }
 
-  updateHud(score, coins, mult, powers, level, progress, maxLevel) {
-    if (level !== this.last.level) {
-      this.el.levelLabel.textContent = `LV ${level}`;
-      this.el.levelNext.textContent = level >= maxLevel ? 'MAX' : `x${level + 1}`;
-      this.last.level = level;
-    }
-    const fill = Math.round(progress * 1000) / 10;
-    if (fill !== this.last.fill) {
-      this.el.levelFill.style.width = `${fill}%`;
-      this.last.fill = fill;
-    }
+  updateHud(score, coins, mult, powers, boosted) {
     if (score !== this.last.score) {
       this.el.score.textContent = score.toLocaleString();
       this.last.score = score;
@@ -150,9 +192,12 @@ export class UI {
     }
     if (mult !== this.last.mult) {
       this.el.mult.textContent = `x${mult}`;
-      this.el.mult.classList.toggle('hot', mult > 1);
+      this.el.mult.classList.remove('pop');
+      void this.el.mult.offsetWidth;
+      this.el.mult.classList.add('pop');
       this.last.mult = mult;
     }
+    this.el.mult.classList.toggle('hot', !!boosted);
     const active = new Set();
     for (const p of powers) {
       active.add(p.type);
@@ -174,14 +219,28 @@ export class UI {
     }
   }
 
+  // Toasts queue up so a mission and a power-up never cover each other.
   toast(text) {
+    if (this.toasts.length >= 4) this.toasts.shift();
+    this.toasts.push(text);
+    if (!this.toastTimer) this._nextToast();
+  }
+
+  _nextToast() {
     const t = this.el.toast;
+    const text = this.toasts.shift();
+    if (text === undefined) {
+      this.toastTimer = null;
+      return;
+    }
     t.textContent = text;
     t.classList.remove('show');
     void t.offsetWidth;
     t.classList.add('show');
-    clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => t.classList.remove('show'), 1400);
+    this.toastTimer = setTimeout(() => {
+      t.classList.remove('show');
+      this.toastTimer = setTimeout(() => this._nextToast(), 80);
+    }, 1400);
   }
 
   flash() {

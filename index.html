@@ -18,11 +18,6 @@
       </button>
       <div id="powers"></div>
     </div>
-    <div id="levelBox" class="level-box" aria-label="Level progress">
-      <span id="levelLabel" class="lv">LV 1</span>
-      <div class="lbar"><div id="levelFill"></div></div>
-      <span id="levelNext" class="lv-next">x2</span>
-    </div>
     <div class="hud-right">
       <div class="pill score-pill"><span id="mult" class="mult">x1</span><span id="score">0</span></div>
       <div class="pill coin-pill"><span class="coin-icon"></span><span id="coinCount">0</span></div>
@@ -34,7 +29,11 @@
       <h1 class="logo">SUBWAY<br><span>RUSH 2</span></h1>
       <p class="stats-line">Best <b id="bestMenu">0</b> &nbsp;·&nbsp; <span class="coin-icon small"></span> <b id="bankMenu">0</b></p>
       <button id="playBtn" class="big-btn">PLAY</button>
-      <button id="charsBtn" class="small-btn">CHARACTERS · <span id="charMenu">Dash</span></button>
+      <div class="menu-tiles">
+        <button id="charsBtn" class="tile-btn"><span class="t-label">Runner</span><span id="charMenu" class="t-value">Dash</span></button>
+        <button id="mapsBtn" class="tile-btn"><span class="t-label">Map</span><span id="mapMenu" class="t-value">Downtown</span></button>
+        <button id="missionsBtn" class="tile-btn"><span class="t-label">Missions</span><span id="missionsMenu" class="t-value">0/3</span></button>
+      </div>
       <div class="help">
         <div><span class="keys"><kbd>←</kbd><kbd>→</kbd></span><span class="touch">Swipe left / right</span>: change lane</div>
         <div><span class="keys"><kbd>↑</kbd> / <kbd>Space</kbd></span><span class="touch">Swipe up</span>: jump</div>
@@ -65,6 +64,36 @@
     </div>
   </div>
 
+  <div id="maps" class="screen chars-screen hidden">
+    <div class="panel chars-panel">
+      <div class="chars-row">
+        <button id="mapPrev" class="round-btn arrow" aria-label="Previous map">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="chars-info">
+          <h2 id="mapName">Downtown</h2>
+          <p id="mapTag" class="tagline"></p>
+          <div id="mapDots" class="dots"></div>
+        </div>
+        <button id="mapNext" class="round-btn arrow" aria-label="Next map">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <button id="mapAction" class="big-btn">SELECTED</button>
+      <button id="mapBack" class="small-btn">BACK</button>
+    </div>
+  </div>
+
+  <div id="missionsScreen" class="screen hidden">
+    <div class="panel">
+      <h2>Daily Missions</h2>
+      <ul id="missionList" class="mission-list"></ul>
+      <p id="missionBonus" class="mission-bonus"></p>
+      <p id="missionReset" class="mission-reset"></p>
+      <button id="missionsBack" class="big-btn">BACK</button>
+    </div>
+  </div>
+
   <div id="pauseScreen" class="screen hidden">
     <div class="panel">
       <h2>Paused</h2>
@@ -78,6 +107,7 @@
       <h2>Game Over</h2>
       <p id="overCause" class="cause"></p>
       <div id="newBest" class="new-best hidden">NEW BEST!</div>
+      <p id="overMissions" class="over-missions"></p>
       <div class="results">
         <div><span>Score</span><b id="overScore">0</b></div>
         <div><span>Coins</span><b id="overCoins">0</b></div>

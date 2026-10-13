@@ -40,6 +40,10 @@ function boot() {
     chars: () => game.openChars(),
     charStep: (dir) => game.charsStep(dir),
     charAction: () => game.charsAction(),
+    maps: () => game.openMaps(),
+    mapStep: (dir) => game.mapsStep(dir),
+    mapAction: () => game.mapsAction(),
+    missions: () => game.openMissions(),
   });
   ui.setMuted(audio.muted);
   try {
@@ -50,8 +54,16 @@ function boot() {
     return;
   }
   new Input(document.body, {
-    left: () => (game.state === 'chars' ? game.charsStep(-1) : game.act('left')),
-    right: () => (game.state === 'chars' ? game.charsStep(1) : game.act('right')),
+    left: () => {
+      if (game.state === 'chars') game.charsStep(-1);
+      else if (game.state === 'maps') game.mapsStep(-1);
+      else game.act('left');
+    },
+    right: () => {
+      if (game.state === 'chars') game.charsStep(1);
+      else if (game.state === 'maps') game.mapsStep(1);
+      else game.act('right');
+    },
     up: () => {
       if (game.state === 'menu' || game.state === 'over') game.confirm();
       else game.act('jump');

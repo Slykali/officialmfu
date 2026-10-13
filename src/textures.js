@@ -37,14 +37,15 @@ function seeded(seed) {
   };
 }
 
+// Light, neutral gravel; each map tints it with the ground material colour.
 export function gravelTexture() {
   const [c, g] = canvas(256, 256);
   const r = seeded(7);
-  g.fillStyle = '#6f675e';
+  g.fillStyle = '#c4c4c4';
   g.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 2600; i++) {
-    const v = 70 + Math.floor(r() * 80);
-    g.fillStyle = `rgb(${v + 8},${v},${v - 8})`;
+    const v = 120 + Math.floor(r() * 135);
+    g.fillStyle = `rgb(${v},${v},${v})`;
     const s = 1 + r() * 3;
     g.fillRect(r() * 256, r() * 256, s, s);
   }
@@ -234,13 +235,13 @@ export function stripeTexture(a, b, w = 256, h = 64) {
   return tex(c);
 }
 
-export function skyTexture() {
+export function skyTexture([top, mid, horizon] = ['#3d8fe0', '#9fd2fb', '#cfe9ff']) {
   const [c, g] = canvas(4, 256);
   const grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#3d8fe0');
-  grad.addColorStop(0.5, '#9fd2fb');
-  grad.addColorStop(0.62, '#cfe9ff');
-  grad.addColorStop(1, '#cfe9ff');
+  grad.addColorStop(0, top);
+  grad.addColorStop(0.5, mid);
+  grad.addColorStop(0.62, horizon);
+  grad.addColorStop(1, horizon);
   g.fillStyle = grad;
   g.fillRect(0, 0, 4, 256);
   return tex(c);
@@ -350,4 +351,44 @@ export function chevronTexture() {
   g.fillRect(122, 0, 6, 128);
   const t = tex(c, true);
   return t;
+}
+
+// Black facade with lit windows, used as an emissive map for night buildings.
+export function nightWindowsTexture() {
+  const [c, g] = canvas(128, 128);
+  const r = seeded(41);
+  g.fillStyle = '#000000';
+  g.fillRect(0, 0, 128, 128);
+  const lit = ['#ffd27a', '#ffe9b0', '#9fe7ff', '#ffb3e6'];
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      if (r() < 0.55) {
+        g.fillStyle = lit[Math.floor(r() * lit.length)];
+        g.fillRect(x * 32 + 7, y * 32 + 7, 18, 20);
+      }
+    }
+  }
+  return tex(c, true);
+}
+
+// Horizontal rock strata, tinted per mesa.
+export function rockTexture() {
+  const [c, g] = canvas(128, 128);
+  const r = seeded(57);
+  g.fillStyle = '#e8e8e8';
+  g.fillRect(0, 0, 128, 128);
+  let y = 0;
+  while (y < 128) {
+    const h = 4 + Math.floor(r() * 14);
+    const v = 170 + Math.floor(r() * 85);
+    g.fillStyle = `rgb(${v},${v},${v})`;
+    g.fillRect(0, y, 128, h);
+    y += h;
+  }
+  for (let i = 0; i < 300; i++) {
+    const v = 120 + Math.floor(r() * 80);
+    g.fillStyle = `rgba(${v},${v},${v},0.5)`;
+    g.fillRect(r() * 128, r() * 128, 2, 1);
+  }
+  return tex(c, true);
 }
