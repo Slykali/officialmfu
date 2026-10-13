@@ -153,8 +153,8 @@ export function stateKey(c, fine) {
   let pk = '';
   for (const k in p) pk += p[k] > 0 ? Math.round(p[k] * (fine ? 60 : 10)) + ',' : '0,';
   if (fine) {
-    return `${c.lane}|${Math.round(c.x * q)}|${Math.round(c.y * q)}|${Math.round(c.vy * q)}|${Math.round(c.rollT * 600)}|` +
-      `${c.rollQueued ? 1 : 0}|${Math.round(c.jumpBuf * 600)}|${Math.round(c.coyote * 600)}|${c.grounded ? 1 : 0}|` +
+    return `${c.lane}|${Math.round(c.x * 100)}|${Math.round(c.y * 100)}|${Math.round(c.vy * 10)}|${Math.round(c.rollT * 60)}|` +
+      `${c.rollQueued ? 1 : 0}|${Math.round(c.jumpBuf * 60)}|${Math.round(c.coyote * 60)}|${c.grounded ? 1 : 0}|` +
       `${Math.round(c.graceT * 60)}|${Math.round(c.stumbleT * 60)}|${Math.round(c.stumbleCool * 60)}|${pk}|${c.powers.length}`;
   }
   return `${c.lane}|${Math.round(c.x * 5)}|${Math.round(c.y * 4)}|${Math.round(c.vy / 2)}|${Math.ceil(c.rollT * 15)}|` +
@@ -231,8 +231,12 @@ export function search(root, opt) {
     const map = new Map();
     for (let ni = 0; ni < frontier.length; ni++) {
       const node = frontier[ni];
+      const ns = node.sim;
       for (let ai = 0; ai < acts.length; ai++) {
         const a = acts[ai];
+        // inputs that provably do nothing are skipped (left in lane 0, right
+        // in lane 2, down while flying)
+        if (ai !== acts.length - 1 && ((a === A_LEFT && ns.lane === 0) || (a === A_RIGHT && ns.lane === 2) || (a === A_DOWN && ns.power.jetpack > 0))) continue;
         const last = ai === acts.length - 1;
         const c = last ? node.sim : cloneClone(node.sim);
         const coinsBefore = c.coins;
@@ -475,13 +479,29 @@ export function judge(cp, seed, untilFrame, opt = {}) {
   const until = cp.s + (H / 60) * 33 + 80;
   const root = rootFromCheckpoint(cp, seed, until);
   const t0 = Date.now();
-  const r = search(root, {
-    horizon: H, every: 1, beam: opt.beam || 30000, fine: opt.fine !== false,
-    allowStumble: !opt.strict, allowBoard: !opt.strict, coinWeight: 0, powerWeight: 0,
-    actions: opt.actions,
-  });
-  return { ok: r.ok, depth: r.depth, horizon: H, fromFrame: cp.frame, fromS: cp.s, peak: r.peak, beam: opt.beam || 30000,
-    truncated: r.peak > (opt.beam || 30000), expanded: r.expanded, ms: Date.now() - t0, plan: r.plan, endS: r.end ? r.end.s : null };
+  const beam = opt.beam || 20000;
+  // Stage A finds an escape quickly when there is an easy one; stage B is the
+  // (near-)exhaustive search: inputs on every frame, ~1 cm / 0.1 m/s / 1 frame
+  // state resolution, beam large enough that it rarely truncates.
+  const stages = opt.stages || [
+    { every: 2, beam: 3000, fine: false },
+    { every: 1, beam, fine: true },
+  ];
+  let r = null;
+  let stage = 0;
+  let expanded = 0;
+  for (; stage < stages.length; stage++) {
+    r = search(root, {
+      horizon: H, ...stages[stage],
+      allowStumble: !opt.strict, allowBoard: !opt.strict, coinWeight: 0, powerWeight: 0,
+    });
+    expanded += r.expanded;
+    if (r.ok) break;
+  }
+  const st = Math.min(stage, stages.length - 1);
+  const last = stages[st];
+  return { ok: r.ok, stage: st, depth: r.depth, horizon: H, fromFrame: cp.frame, fromS: cp.s, peak: r.peak,
+    beam: last.beam, truncated: r.peak > last.beam, expanded, ms: Date.now() - t0, plan: r.plan, endS: r.end ? r.end.s : null };
 }
 
 // ---------------------------------------------------------------------------

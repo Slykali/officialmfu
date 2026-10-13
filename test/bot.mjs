@@ -431,7 +431,7 @@ function analyseFailure(job, cps, frame, sim, oracle, opt) {
     if (!cp || used.has(cp.frame)) continue;
     used.add(cp.frame);
     const r = judge(cp, job.seed, frame + extra, { strict: opt.strict, beam: 30000 });
-    tries.push({ fromFrame: cp.frame, fromS: +cp.s.toFixed(2), secondsBefore: +((frame - cp.frame) / 60).toFixed(2), survived: r.ok, depth: r.depth, horizon: r.horizon, peak: r.peak, truncated: r.truncated, ms: r.ms });
+    tries.push({ fromFrame: cp.frame, fromS: +cp.s.toFixed(2), secondsBefore: +((frame - cp.frame) / 60).toFixed(2), survived: r.ok, stage: r.stage, depth: r.depth, horizon: r.horizon, peak: r.peak, truncated: r.truncated, ms: r.ms });
     if (r.ok) { verdict = 'avoidable (bot weakness)'; break; }
   }
   const deathS = sim ? sim.s : opt.s;
@@ -526,7 +526,7 @@ function selftest() {
     const sim = new Sim(seed);
     for (let i = 0; i < 60; i++) { sim.step(DT); sim.takeEvents(); }
     const cp = checkpoint(sim, 60);
-    const wallS = sim.s + 45;
+    const wallS = sim.s + 30;
     for (let lane = 0; lane < 3; lane++) cp.sim.trains.push({ kind: 'train', id: 900000 + lane, lane, s: wallS, cars: 2, len: 28, ramp: false, moving: false, k: 0, R: 0, livery: 0 });
     const framesToWall = Math.ceil(((wallS - sim.s) / sim.speed) * 60) + 60;
     const r = judge(cp, seed, 60 + framesToWall, { beam: 30000 });
