@@ -26,7 +26,7 @@ const FIRST_ROW = 70;
 const GAP_AFTER_TRAIN = 16; // free track after a train before the next object
 const GAP_AFTER_BARRIER = 8;
 const COIN_SPACING = 2.4;
-const POWER_MIN_GAP = 320;
+const POWER_MIN_GAP = 240;
 const POWER_WEIGHTS = { magnet: 3, multiplier: 2, sneakers: 2, jetpack: 1.5, board: 1.5 };
 
 export const rowGap = (s) => Math.max(20, speedAt(s) * 0.8);
@@ -134,7 +134,7 @@ export class LevelGenerator {
       this.objFree[lane] = s + GAP_AFTER_BARRIER;
       return 'overhead';
     }
-    if (s - this.lastPower > POWER_MIN_GAP && r() < 0.16) {
+    if (s - this.lastPower > POWER_MIN_GAP && r() < 0.22) {
       this.lastPower = s;
       out.push({ kind: 'power', id: this._id(), lane, s, y: 1.2, type: this._powerType() });
       this.objFree[lane] = s + GAP_AFTER_BARRIER;

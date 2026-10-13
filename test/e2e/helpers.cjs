@@ -1,5 +1,5 @@
 // Shared helpers for the Playwright play-tests.
-// Usage: node test/e2e/<script>.cjs  (screenshots go to $SHOTS or ./test/e2e/shots)
+// Usage: SHOTS=/some/dir node test/e2e/<script>.cjs  (screenshots go to $SHOTS, default <tmp>/sr2-e2e-shots)
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -7,7 +7,7 @@ const path = require('path');
 const pw = require('/opt/node22/lib/node_modules/playwright');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const SHOTS = process.env.SHOTS || path.join(__dirname, 'shots');
+const SHOTS = process.env.SHOTS || path.join(require('os').tmpdir(), 'sr2-e2e-shots');
 fs.mkdirSync(SHOTS, { recursive: true });
 
 const TYPES = {

@@ -121,6 +121,18 @@ export class Audio {
         this._noise(0.4, { vol: 0.4, freq: 1800, q: 0.6 });
         this._tone(600, 0.3, { type: 'square', vol: 0.1, slide: 0.3 });
         break;
+      case 'bark':
+        for (const d of [0, 0.18]) {
+          this._tone(520, 0.09, { type: 'sawtooth', vol: 0.14, slide: 0.55, delay: d });
+          this._noise(0.08, { vol: 0.18, freq: 900, q: 1.5, delay: d });
+        }
+        break;
+      case 'horn':
+        for (const f of [311, 370]) this._tone(f, 0.75, { type: 'sawtooth', vol: 0.06, slide: 0.97 });
+        break;
+      case 'level':
+        [659, 784, 988, 1318].forEach((f, i) => this._tone(f, 0.18, { type: 'triangle', vol: 0.14, delay: i * 0.08 }));
+        break;
       case 'click':
         this._tone(880, 0.06, { type: 'square', vol: 0.08 });
         break;

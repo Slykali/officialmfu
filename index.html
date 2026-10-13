@@ -18,6 +18,11 @@
       </button>
       <div id="powers"></div>
     </div>
+    <div id="levelBox" class="level-box" aria-label="Level progress">
+      <span id="levelLabel" class="lv">LV 1</span>
+      <div class="lbar"><div id="levelFill"></div></div>
+      <span id="levelNext" class="lv-next">x2</span>
+    </div>
     <div class="hud-right">
       <div class="pill score-pill"><span id="mult" class="mult">x1</span><span id="score">0</span></div>
       <div class="pill coin-pill"><span class="coin-icon"></span><span id="coinCount">0</span></div>
@@ -29,12 +34,34 @@
       <h1 class="logo">SUBWAY<br><span>RUSH 2</span></h1>
       <p class="stats-line">Best <b id="bestMenu">0</b> &nbsp;·&nbsp; <span class="coin-icon small"></span> <b id="bankMenu">0</b></p>
       <button id="playBtn" class="big-btn">PLAY</button>
+      <button id="charsBtn" class="small-btn">CHARACTERS · <span id="charMenu">Dash</span></button>
       <div class="help">
-        <div><kbd>←</kbd><kbd>→</kbd> or swipe sideways: change lane</div>
-        <div><kbd>↑</kbd> / <kbd>Space</kbd> or swipe up: jump</div>
-        <div><kbd>↓</kbd> or swipe down: roll</div>
-        <div class="dim">Jump the red &amp; white barriers, roll under the yellow signs, run up ramps onto the trains. <kbd>P</kbd> pause · <kbd>M</kbd> mute</div>
+        <div><span class="keys"><kbd>←</kbd><kbd>→</kbd></span><span class="touch">Swipe left / right</span>: change lane</div>
+        <div><span class="keys"><kbd>↑</kbd> / <kbd>Space</kbd></span><span class="touch">Swipe up</span>: jump</div>
+        <div><span class="keys"><kbd>↓</kbd></span><span class="touch">Swipe down</span>: roll</div>
+        <div class="dim">Jump the red &amp; white barriers, roll under the yellow signs, run up ramps onto the trains. Grab glowing orbs for boosts.<span class="keys"> <kbd>P</kbd> pause · <kbd>M</kbd> mute</span></div>
       </div>
+    </div>
+  </div>
+
+  <div id="chars" class="screen chars-screen hidden">
+    <div class="panel chars-panel">
+      <div class="chars-bank"><span class="coin-icon small"></span> <b id="charsBank">0</b></div>
+      <div class="chars-row">
+        <button id="charPrev" class="round-btn arrow" aria-label="Previous character">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="chars-info">
+          <h2 id="charName">Dash</h2>
+          <p id="charTag" class="tagline"></p>
+          <div id="charDots" class="dots"></div>
+        </div>
+        <button id="charNext" class="round-btn arrow" aria-label="Next character">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <button id="charAction" class="big-btn">SELECTED</button>
+      <button id="charBack" class="small-btn">BACK</button>
     </div>
   </div>
 

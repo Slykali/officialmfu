@@ -37,6 +37,9 @@ function boot() {
     menu: () => game.toMenu(),
     pause: () => game.pause(),
     mute: toggleMute,
+    chars: () => game.openChars(),
+    charStep: (dir) => game.charsStep(dir),
+    charAction: () => game.charsAction(),
   });
   ui.setMuted(audio.muted);
   try {
@@ -47,14 +50,22 @@ function boot() {
     return;
   }
   new Input(document.body, {
-    left: () => game.act('left'),
-    right: () => game.act('right'),
-    up: () => game.act('jump'),
+    left: () => (game.state === 'chars' ? game.charsStep(-1) : game.act('left')),
+    right: () => (game.state === 'chars' ? game.charsStep(1) : game.act('right')),
+    up: () => {
+      if (game.state === 'menu' || game.state === 'over') game.confirm();
+      else game.act('jump');
+    },
     down: () => game.act('down'),
     pause: () => game.togglePause(),
     mute: toggleMute,
     confirm: () => game.confirm(),
-    tap: () => { if (game.state === 'menu') game.start(); },
+  });
+  // Tapping anywhere on the menu starts a run. This listens for the click (not the
+  // pointer release) so the same tap can't also land on the pause button that appears.
+  document.getElementById('menu').addEventListener('click', (e) => {
+    if (e.target instanceof Element && e.target.closest('button')) return;
+    if (game.state === 'menu') game.start();
   });
   document.getElementById('loading').classList.add('hidden');
   window.__game = game; // handy for debugging from the console

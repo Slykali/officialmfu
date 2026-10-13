@@ -70,6 +70,7 @@ export class World {
     wallTex.repeat.set(TILE / 16, 1);
     const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9 });
     const wallGeo = new THREE.BoxGeometry(0.6, 1.8, TILE);
+    const wallTopMat = mat('#9a968e', { roughness: 0.95 });
     const facade = facadeTexture();
     this.buildingGeos = [];
     for (let i = 0; i < 14; i++) {
@@ -102,7 +103,7 @@ export class World {
       const tile = new THREE.Group();
       tile.userData.buildings = [];
       for (const side of [-1, 1]) {
-        const wall = new THREE.Mesh(wallGeo, wallMat);
+        const wall = new THREE.Mesh(wallGeo, [wallMat, wallMat, wallTopMat, wallTopMat, wallTopMat, wallTopMat]);
         wall.position.set(side * 5.1, 0.9, -TILE / 2);
         wall.receiveShadow = true;
         tile.add(wall);

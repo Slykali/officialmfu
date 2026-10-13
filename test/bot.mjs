@@ -18,6 +18,7 @@
 //              search to decide whether it was reachable at all
 //   jetstress  like seek, but the harness also force-activates a jetpack every
 //              ~25 s (via Sim._activate) to test landings at random places
+//   jetcoins   coin-greedy with forced jetpacks: checks the sky coin trails
 //
 // The bot only uses the public inputs left/right/jump/down, at most one per
 // 1/60 s frame, and steps the sim with step(1/60). It plans with lookahead
@@ -105,6 +106,7 @@ function buildJobs(o) {
     for (const s of range(2001, 2060)) jobs.push({ seed: s, variant: 'blind', dist: o.dist });
     for (const s of range(3001, 3040)) jobs.push({ seed: s, variant: 'jetstress', dist: o.dist });
     for (const s of range(4001, 4012)) jobs.push({ seed: s, variant: 'coins', dist: 3000 });
+    for (const s of range(5001, 5004)) jobs.push({ seed: s, variant: 'jetcoins', dist: 3000 });
     return jobs;
   }
   for (const s of range(1, 24)) jobs.push({ seed: s, variant: 'safe', dist: o.dist });
@@ -125,6 +127,7 @@ function variantBot(variant, oracle) {
     case 'jetstress': return new Bot({ oracle, powers: 'seek' });
     case 'blind': return new Bot({ oracle: null, powers: 'ignore', horizon: 180 });
     case 'coins': return new Bot({ oracle, powers: 'avoid', coins: true });
+    case 'jetcoins': return new Bot({ oracle, powers: 'ignore', coins: true });
     default: throw new Error(`unknown variant ${variant}`);
   }
 }
@@ -160,6 +163,7 @@ export function runOne(job, log = () => {}) {
   const passed = new Set();
   let coinChecks = 0;
   const pendingIncidents = [];
+  const jetFrames = [];
   const liveTrains = new Map(); // id -> train (for placement checks)
   let fingerprintChecks = 0;
 
@@ -223,10 +227,12 @@ export function runOne(job, log = () => {}) {
       cps.push(checkpoint(sim, frame));
       if (cps.length > 26) cps.shift();
     }
-    if (variant === 'jetstress' && frame >= nextJet && sim.power.jetpack <= 0 && sim.graceT <= 0) {
+    if ((variant === 'jetstress' || variant === 'jetcoins') && frame >= nextJet && sim.power.jetpack <= 0 && sim.graceT <= 0) {
       sim._activate('jetpack'); // synthetic: same code path as a pickup
       nextJet = frame + 25 * 60;
       bot.tail = null; // world changed outside the bot's model
+      cps.push(checkpoint(sim, frame)); // so sky-coin checks can start after the activation
+      jetFrames.push(frame);
     }
     const fpBefore = (frame % 97 === 0) ? itemFingerprint(sim) : null;
     const a = bot.act(sim);
@@ -338,11 +344,12 @@ export function runOne(job, log = () => {}) {
     }
 
     // ---- coins / powers passed without pickup
-    if (variant === 'coins') {
+    if (variant === 'coins' || variant === 'jetcoins') {
       for (const c of sim.coinItems) {
         if (passed.has(c.id) || c.s >= sim.s - 1.5) continue;
         passed.add(c.id);
-        if (c.id < 0) continue; // jetpack sky coins
+        if (c.id < 0 && variant === 'coins') continue; // jetpack sky coins
+        if (c.id > 0 && variant === 'jetcoins') continue; // ground coins under a forced flight are expected misses
         const miss = { id: c.id, lane: c.lane, s: c.s, y: c.y, frame: R.frames };
         R.coinsMissed.push(miss);
         if (coinChecks < (workerData?.maxMissedCoinChecks ?? 25)) {
@@ -350,11 +357,15 @@ export function runOne(job, log = () => {}) {
           const res = coinReachable(job, cps, miss);
           miss.reachable = res.ok;
           miss.how = res.how;
-          if (!res.ok) R.coinsUnreachable.push({ ...miss, context: res.context });
+          if (res.ok === false) R.coinsUnreachable.push({ ...miss, context: res.context });
         }
       }
     }
     if (variant === 'seek' || variant === 'jetstress') {
+      // jetpack sky coins (negative ids): count the ones that get left behind
+      for (const c of sim.coinItems) {
+        if (c.id < 0 && !passed.has(c.id) && c.s < sim.s - 1.5) { passed.add(c.id); R.skyMissed = (R.skyMissed || 0) + 1; }
+      }
       for (const p of sim.powers) {
         if (!passed.has(p.id) && p.s < sim.s - 1.5) { passed.add(p.id); R.powersMissed.push({ id: p.id, lane: p.lane, s: p.s, type: p.type, frame: R.frames }); }
       }
@@ -425,13 +436,18 @@ function analyseFailure(job, cps, frame, sim, oracle, opt) {
   };
   const extra = opt.extra ?? 90;
   let verdict = 'UNAVOIDABLE';
+  // Stage A (coarse, fast) from each checkpoint first; the near-exhaustive
+  // stage B only if all of those fail.
+  const plan = [];
+  for (const secs of [3, 6, 10]) plan.push({ secs, stages: [{ every: 2, beam: 3000, fine: false }], name: 'A' });
+  for (const secs of [3, 6]) plan.push({ secs, stages: [{ every: 1, beam: opt.beamB || 20000, fine: true }], name: 'B' });
   const used = new Set();
-  for (const secs of [3, 6, 10]) {
-    const cp = pick(secs);
-    if (!cp || used.has(cp.frame)) continue;
-    used.add(cp.frame);
-    const r = judge(cp, job.seed, frame + extra, { strict: opt.strict, beam: 30000 });
-    tries.push({ fromFrame: cp.frame, fromS: +cp.s.toFixed(2), secondsBefore: +((frame - cp.frame) / 60).toFixed(2), survived: r.ok, stage: r.stage, depth: r.depth, horizon: r.horizon, peak: r.peak, truncated: r.truncated, ms: r.ms });
+  for (const p of plan) {
+    const cp = pick(p.secs);
+    if (!cp || used.has(p.name + cp.frame)) continue;
+    used.add(p.name + cp.frame);
+    const r = judge(cp, job.seed, frame + extra, { strict: opt.strict, stages: p.stages });
+    tries.push({ stage: p.name, fromFrame: cp.frame, fromS: +cp.s.toFixed(2), secondsBefore: +((frame - cp.frame) / 60).toFixed(2), survived: r.ok, depth: r.depth, horizon: r.horizon, peak: r.peak, truncated: r.truncated, ms: r.ms });
     if (r.ok) { verdict = 'avoidable (bot weakness)'; break; }
   }
   const deathS = sim ? sim.s : opt.s;
@@ -447,12 +463,16 @@ function analyseFailure(job, cps, frame, sim, oracle, opt) {
 // checkpoint that is >= ~1.5 s before the player reached the coin.
 function coinReachable(job, cps, c) {
   const framesToCoin = (cpFrame) => c.frame - cpFrame;
-  let cp = null;
-  for (const k of cps) if (c.frame - k.frame >= 90 && (!cp || k.frame > cp.frame)) cp = k;
-  if (!cp) return { ok: true, how: 'no-checkpoint' };
-  const root = rootFromCheckpoint(cp, job.seed, c.s + 120);
   const id = c.id;
-  if (!root.coinItems.some((k) => k.id === id)) return { ok: true, how: 'already-gone-at-checkpoint' };
+  // the latest checkpoint >= 1.5 s before the coin was passed that still holds
+  // the coin; failing that (e.g. sky coins created by a jetpack shortly
+  // before), the earliest checkpoint holding it at least 0.25 s before.
+  const holds = cps.filter((k) => k.frame <= c.frame - 15 && k.sim.coinItems.some((q) => q.id === id));
+  let cp = null;
+  for (const k of holds) if (c.frame - k.frame >= 90 && (!cp || k.frame > cp.frame)) cp = k;
+  if (!cp && holds.length) cp = holds[0];
+  if (!cp) return { ok: null, how: 'no-checkpoint' };
+  const root = rootFromCheckpoint(cp, job.seed, c.s + 120);
   const H = framesToCoin(cp.frame) + 10;
   const r = search(root, {
     horizon: H, every: 1, beam: 4000, allowStumble: true, allowBoard: true,
@@ -526,7 +546,7 @@ function selftest() {
     const sim = new Sim(seed);
     for (let i = 0; i < 60; i++) { sim.step(DT); sim.takeEvents(); }
     const cp = checkpoint(sim, 60);
-    const wallS = sim.s + 30;
+    const wallS = sim.s + 22;
     for (let lane = 0; lane < 3; lane++) cp.sim.trains.push({ kind: 'train', id: 900000 + lane, lane, s: wallS, cars: 2, len: 28, ramp: false, moving: false, k: 0, R: 0, livery: 0 });
     const framesToWall = Math.ceil(((wallS - sim.s) / sim.speed) * 60) + 60;
     const r = judge(cp, seed, 60 + framesToWall, { beam: 30000 });
@@ -635,7 +655,7 @@ function report(results, o, ms) {
     for (const r of dead) {
       const d = r.deaths[0];
       console.log(`  DEATH seed=${r.seed} frame=${r.deathFrame} s=${r.s} cause=${r.deathCause} -> ${d.verdict}`);
-      for (const t of d.tries) console.log(`      judge from ${t.secondsBefore}s before (s=${t.fromS}): survived=${t.survived} depth=${t.depth}/${t.horizon} peak=${t.peak}${t.truncated ? ' (beam-truncated)' : ''} ${t.ms}ms`);
+      for (const t of d.tries) console.log(`      judge stage ${t.stage} from ${t.secondsBefore}s before (s=${t.fromS}): survived=${t.survived} depth=${t.depth}/${t.horizon} peak=${t.peak}${t.truncated ? ' (beam-truncated)' : ''} ${t.ms}ms`);
       if (d.layout) console.log(d.layout);
     }
     for (const r of ok) for (const i of r.incidents) {
@@ -669,8 +689,11 @@ function report(results, o, ms) {
     const mov = ok.flatMap((r) => r.movingOverlaps.map((m) => ({ seed: r.seed, ...m })));
     if (mov.length) console.log(`  moving train overlaps items near/ahead of player: ${mov.length} e.g. ${JSON.stringify(mov[0])}`);
     const pmiss = ok.flatMap((r) => r.powersMissed.map((m) => ({ seed: r.seed, ...m })));
-    if (v === 'seek' || v === 'jetstress') console.log(`  power-ups passed without pickup: ${pmiss.length}${pmiss.length ? ' e.g. ' + JSON.stringify(pmiss.slice(0, 3)) : ''}`);
-    if (v === 'coins') {
+    if (v === 'seek' || v === 'jetstress') {
+      console.log(`  power-ups passed without pickup: ${pmiss.length}${pmiss.length ? ' e.g. ' + JSON.stringify(pmiss.slice(0, 3)) : ''}`);
+      console.log(`  jetpack sky coins left behind: ${ok.reduce((a, r) => a + (r.skyMissed || 0), 0)}`);
+    }
+    if (v === 'coins' || v === 'jetcoins') {
       const seen = ok.reduce((a, r) => a + r.coinsTaken + r.coinsMissed.length, 0);
       const missed = ok.reduce((a, r) => a + r.coinsMissed.length, 0);
       const checked = ok.reduce((a, r) => a + (r.coinsMissedChecked || 0), 0);

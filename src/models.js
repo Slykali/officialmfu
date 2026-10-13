@@ -3,7 +3,8 @@
 import * as THREE from 'three';
 import { TRAIN, RAMP_L, HURDLE, OVERHEAD } from './config.js';
 import {
-  trainSideTexture, trainFrontTexture, trainEndTexture, stripeTexture, powerTexture,
+  trainSideTexture, trainFrontTexture, trainEndTexture, stripeTexture, powerTexture, glowTexture, chevronTexture,
+  POWER_COLORS,
 } from './textures.js';
 
 const geoCache = new Map();
@@ -50,7 +51,6 @@ export function makeCharacter(o) {
   const shirt = mat(o.shirt);
   const pants = mat(o.pants);
   const shoes = mat(o.shoes);
-  const capM = mat(o.cap);
 
   const legs = [];
   for (const side of [-1, 1]) {
@@ -58,20 +58,26 @@ export function makeCharacter(o) {
     leg.position.set(side * 0.14, 0.82, 0);
     leg.add(mesh(box(0.21, 0.74, 0.24), pants, 0, -0.37, 0));
     leg.add(mesh(box(0.25, 0.14, 0.38), shoes, 0, -0.76, -0.06));
+    if (o.soles) leg.add(mesh(box(0.26, 0.04, 0.39), mat(o.soles), 0, -0.82, -0.06));
     body.add(leg);
     legs.push(leg);
   }
   body.add(mesh(box(0.6, 0.64, 0.34), shirt, 0, 1.13, 0));
+  if (o.stripe) {
+    body.add(mesh(box(0.62, 0.09, 0.36), mat(o.stripe), 0, 1.2, 0));
+    body.add(mesh(box(0.06, 0.6, 0.36), mat(o.stripe), 0, 1.13, 0.001));
+  }
   if (o.backpack) body.add(mesh(box(0.44, 0.46, 0.2), mat(o.backpack), 0, 1.16, 0.26));
   if (o.badge) body.add(mesh(box(0.12, 0.12, 0.04), mat('#ffd43b', { metalness: 0.6, roughness: 0.3 }), -0.15, 1.28, -0.18));
-  if (o.belt) body.add(mesh(box(0.62, 0.08, 0.36), mat('#222'), 0, 0.84, 0));
+  if (o.belt) body.add(mesh(box(0.62, 0.08, 0.36), mat(o.belt === true ? '#222' : o.belt), 0, 0.84, 0));
 
   const arms = [];
   for (const side of [-1, 1]) {
     const arm = new THREE.Group();
     arm.position.set(side * 0.39, 1.4, 0);
-    arm.add(mesh(box(0.17, 0.58, 0.19), shirt, 0, -0.27, 0));
-    arm.add(mesh(box(0.15, 0.13, 0.17), skin, 0, -0.6, 0));
+    arm.add(mesh(box(0.17, 0.58, 0.19), mat(o.sleeves || o.shirt), 0, -0.27, 0));
+    if (o.stripe) arm.add(mesh(box(0.18, 0.08, 0.2), mat(o.stripe), 0, -0.42, 0));
+    arm.add(mesh(box(0.15, 0.13, 0.17), o.gloves ? mat(o.gloves) : skin, 0, -0.6, 0));
     body.add(arm);
     arms.push(arm);
   }
@@ -82,10 +88,44 @@ export function makeCharacter(o) {
   const eye = mat('#1b1b1b');
   head.add(mesh(box(0.07, 0.08, 0.02), eye, -0.1, 0.25, -0.215, false));
   head.add(mesh(box(0.07, 0.08, 0.02), eye, 0.1, 0.25, -0.215, false));
-  head.add(mesh(box(0.46, 0.13, 0.46), capM, 0, 0.47, 0));
-  // brim: forward for the guard, backwards for the runner
-  head.add(mesh(box(0.42, 0.05, 0.24), capM, 0, 0.43, o.brimForward ? -0.32 : 0.32));
-  if (o.hair) head.add(mesh(box(0.44, 0.1, 0.1), mat(o.hair), 0, 0.36, 0.18));
+  head.add(mesh(box(0.12, 0.03, 0.02), mat('#7a3b2e'), 0, 0.1, -0.215, false));
+
+  if (o.hair) {
+    const hm = mat(o.hair);
+    head.add(mesh(box(0.44, 0.08, 0.44), hm, 0, 0.44, 0));
+    head.add(mesh(box(0.44, 0.24, 0.08), hm, 0, 0.3, 0.19));
+    if (o.hairStyle === 'bun') head.add(mesh(box(0.2, 0.18, 0.2), hm, 0, 0.56, 0.1));
+    if (o.hairStyle === 'long') head.add(mesh(box(0.44, 0.5, 0.1), hm, 0, 0.18, 0.22));
+    if (o.hairStyle === 'spiky') {
+      for (const [x, z, r] of [[-0.12, -0.08, 0.3], [0.02, 0.02, -0.1], [0.14, -0.06, -0.35], [0, 0.14, 0.15]]) {
+        const sp = mesh(box(0.1, 0.18, 0.1), hm, x, 0.54, z);
+        sp.rotation.z = r;
+        head.add(sp);
+      }
+    }
+  }
+  if (o.hat === 'cap' || o.hat === 'capFwd') {
+    const capM = mat(o.hatColor);
+    head.add(mesh(box(0.46, 0.13, 0.46), capM, 0, 0.47, 0));
+    head.add(mesh(box(0.42, 0.05, 0.24), capM, 0, 0.43, o.hat === 'capFwd' ? -0.32 : 0.32));
+  } else if (o.hat === 'beanie') {
+    const bm = mat(o.hatColor);
+    head.add(mesh(box(0.46, 0.2, 0.46), bm, 0, 0.5, 0));
+    head.add(mesh(box(0.48, 0.07, 0.48), mat(o.hatTrim || o.hatColor), 0, 0.41, 0));
+    if (o.pompom) head.add(mesh(box(0.13, 0.13, 0.13), mat(o.pompom), 0, 0.66, 0));
+  }
+  if (o.glasses) {
+    const gm = mat(o.glasses, { metalness: 0.3, roughness: 0.3 });
+    head.add(mesh(box(0.42, 0.04, 0.03), gm, 0, 0.29, -0.225, false));
+    head.add(mesh(box(0.13, 0.1, 0.03), gm, -0.1, 0.25, -0.228, false));
+    head.add(mesh(box(0.13, 0.1, 0.03), gm, 0.1, 0.25, -0.228, false));
+  }
+  if (o.headphones) {
+    const pm = mat(o.headphones, { metalness: 0.2, roughness: 0.4 });
+    head.add(mesh(box(0.08, 0.2, 0.18), pm, -0.24, 0.24, 0));
+    head.add(mesh(box(0.08, 0.2, 0.18), pm, 0.24, 0.24, 0));
+    head.add(mesh(box(0.5, 0.06, 0.1), pm, 0, o.hat ? 0.58 : 0.5, 0));
+  }
   body.add(head);
 
   root.scale.setScalar(o.scale || 1);
@@ -93,11 +133,8 @@ export function makeCharacter(o) {
   return { root, pivot, body, legs, arms, head };
 }
 
-export function makeRunner() {
-  const c = makeCharacter({
-    skin: '#f1c27d', shirt: '#ff3d68', pants: '#2b59c3', shoes: '#f8f9fa', cap: '#ffd23f',
-    backpack: '#3bc9db', hair: '#4a2c1d',
-  });
+export function makeRunner(look) {
+  const c = makeCharacter(look);
   // hoverboard
   const board = new THREE.Group();
   board.add(mesh(box(0.62, 0.08, 1.45), mat('#9c36b5', { emissive: '#5a189a', emissiveIntensity: 0.6 }), 0, 0, 0));
@@ -128,9 +165,52 @@ export function makeRunner() {
 
 export function makeGuard() {
   return makeCharacter({
-    skin: '#e0ac69', shirt: '#1d3557', pants: '#14213d', shoes: '#111111', cap: '#14213d',
-    badge: true, belt: true, brimForward: true, scale: 1.05,
+    skin: '#e0ac69', shirt: '#1d3557', pants: '#14213d', shoes: '#111111', hat: 'capFwd', hatColor: '#14213d',
+    badge: true, belt: true, scale: 1.05,
   });
+}
+
+// Blocky guard dog. Forward is -Z, root at the paws.
+export function makeDog() {
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  root.add(body);
+  const fur = mat('#a0662f');
+  const light = mat('#e9c99a');
+  const dark = mat('#4a2c17');
+  body.add(mesh(box(0.34, 0.32, 0.82), fur, 0, 0.56, 0));
+  body.add(mesh(box(0.3, 0.12, 0.5), light, 0, 0.42, -0.1));
+  body.add(mesh(box(0.37, 0.07, 0.09), mat('#e03131'), 0, 0.7, -0.36)); // collar
+  const head = new THREE.Group();
+  head.position.set(0, 0.78, -0.48);
+  head.add(mesh(box(0.3, 0.3, 0.32), fur, 0, 0, 0));
+  head.add(mesh(box(0.2, 0.15, 0.22), light, 0, -0.05, -0.24));
+  head.add(mesh(box(0.08, 0.06, 0.05), mat('#111'), 0, 0.01, -0.36, false));
+  head.add(mesh(box(0.05, 0.05, 0.02), mat('#111'), -0.08, 0.07, -0.165, false));
+  head.add(mesh(box(0.05, 0.05, 0.02), mat('#111'), 0.08, 0.07, -0.165, false));
+  for (const s of [-1, 1]) {
+    const ear = mesh(box(0.08, 0.17, 0.08), dark, s * 0.12, 0.17, 0.06);
+    ear.rotation.z = s * 0.25;
+    head.add(ear);
+  }
+  body.add(head);
+  const tail = new THREE.Group();
+  tail.position.set(0, 0.66, 0.4);
+  const tm = mesh(box(0.07, 0.07, 0.32), fur, 0, 0, 0.14);
+  tail.add(tm);
+  tail.rotation.x = 0.6;
+  body.add(tail);
+  const legs = [];
+  for (const [x, z] of [[-0.11, -0.3], [0.11, -0.3], [-0.11, 0.3], [0.11, 0.3]]) {
+    const leg = new THREE.Group();
+    leg.position.set(x, 0.44, z);
+    leg.add(mesh(box(0.1, 0.4, 0.1), fur, 0, -0.2, 0));
+    leg.add(mesh(box(0.12, 0.06, 0.14), light, 0, -0.41, -0.02));
+    body.add(leg);
+    legs.push(leg);
+  }
+  root.traverse((c) => { if (c.isMesh) c.castShadow = true; });
+  return { root, body, head, tail, legs };
 }
 
 // --------------------------------------------------------------------- trains
@@ -156,7 +236,12 @@ function trainMaterials(livery, moving) {
   return m;
 }
 
+let glowTex = null;
+const sharedGlow = () => glowTex || (glowTex = glowTexture());
+
 let rampGeo = null;
+let rampMats = null;
+let glowMat = null;
 function rampGeometry() {
   if (rampGeo) return rampGeo;
   const w = 2.2;
@@ -170,6 +255,10 @@ function rampGeometry() {
   const tris = [A, B, D, A, D, C, E, C, D, E, D, F, A, C, E, B, F, D];
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(tris.flat(), 3));
+  // chevrons on the slope only: u across, v up the ramp (4 repeats)
+  const uv = new Array(tris.length * 2).fill(0);
+  [[0, 0], [1, 0], [1, 4], [0, 0], [1, 4], [0, 4]].forEach(([u, v], i) => { uv[i * 2] = u; uv[i * 2 + 1] = v; });
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.computeVertexNormals();
   g.addGroup(0, 6, 0);
   g.addGroup(6, 12, 1);
@@ -200,13 +289,34 @@ export function makeTrain(t) {
     if (i > 0) g.add(mesh(box(0.8, 0.5, 0.7), M.under, 0, 1.2, -(i * L), false));
   }
   if (t.ramp) {
-    const r = new THREE.Mesh(rampGeometry(), [
-      mat('#d9a404', { metalness: 0.5, roughness: 0.4 }),
-      mat('#7a5c00', { metalness: 0.3, roughness: 0.6 }),
-    ]);
+    if (!rampMats) {
+      rampMats = [
+        new THREE.MeshStandardMaterial({ map: chevronTexture(), roughness: 0.55, metalness: 0.2 }),
+        mat('#7a5c00', { metalness: 0.3, roughness: 0.6 }),
+      ];
+    }
+    const r = new THREE.Mesh(rampGeometry(), rampMats);
     r.castShadow = true;
     r.receiveShadow = true;
     g.add(r);
+  }
+  if (t.moving) {
+    // bright headlights and a flashing beacon so oncoming trains stand out
+    if (!glowMat) {
+      glowMat = new THREE.SpriteMaterial({
+        map: sharedGlow(), color: '#fff6d5', blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+      });
+    }
+    for (const x of [-0.72, 0.72]) {
+      const s = new THREE.Sprite(glowMat);
+      s.scale.set(1.5, 1.5, 1);
+      s.position.set(x, 1.79, 0.12);
+      g.add(s);
+    }
+    const beacon = mesh(box(0.34, 0.18, 0.34), mat('#ff2a2a', { emissive: '#ff0000', emissiveIntensity: 2 }), 0, TRAIN.height + 0.09, -0.6, false);
+    beacon.userData.beacon = true;
+    g.add(beacon);
+    g.userData.beacon = beacon;
   }
   return g;
 }
@@ -271,14 +381,55 @@ export function makeCoin() {
   return m;
 }
 
-const powerMats = new Map();
+// Power-up orb: a glowing bubble with the power's icon floating inside.
+const orbParts = new Map();
+let orbGeo = null;
+let ringGeo = null;
 export function makePower(type) {
-  let m = powerMats.get(type);
-  if (!m) {
-    m = new THREE.SpriteMaterial({ map: powerTexture(type), depthWrite: false });
-    powerMats.set(type, m);
+  if (!orbGeo) {
+    orbGeo = new THREE.SphereGeometry(0.62, 24, 16);
+    ringGeo = new THREE.TorusGeometry(0.8, 0.06, 8, 40);
   }
+  let p = orbParts.get(type);
+  if (!p) {
+    const col = POWER_COLORS[type];
+    p = {
+      shell: new THREE.MeshStandardMaterial({
+        color: col, emissive: col, emissiveIntensity: 0.7, transparent: true, opacity: 0.22,
+        roughness: 0.1, metalness: 0.1, depthWrite: false,
+      }),
+      ring: new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85 }),
+      icon: new THREE.SpriteMaterial({ map: powerTexture(type), depthWrite: false, depthTest: true }),
+      glow: new THREE.SpriteMaterial({
+        map: sharedGlow(), color: col, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.9,
+      }),
+    };
+    orbParts.set(type, p);
+  }
+  const g = new THREE.Group();
+  const glow = new THREE.Sprite(p.glow);
+  glow.scale.set(3, 3, 1);
+  g.add(glow);
+  const icon = new THREE.Sprite(p.icon);
+  icon.scale.set(1.3, 1.3, 1);
+  icon.renderOrder = 3; // draw the icon over the bubble so it stays crisp
+  g.add(icon);
+  const shell = new THREE.Mesh(orbGeo, p.shell);
+  shell.renderOrder = 2;
+  g.add(shell);
+  const ring = new THREE.Mesh(ringGeo, p.ring);
+  g.add(ring);
+  g.userData.ring = ring;
+  return g;
+}
+
+// Expanding ring shown when an orb is collected.
+export function makeBurst(type) {
+  const m = new THREE.SpriteMaterial({
+    map: sharedGlow(), color: POWER_COLORS[type] || '#ffd23f', blending: THREE.AdditiveBlending,
+    depthWrite: false, transparent: true,
+  });
   const s = new THREE.Sprite(m);
-  s.scale.set(1.5, 1.5, 1);
+  s.scale.set(1, 1, 1);
   return s;
 }

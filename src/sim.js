@@ -3,7 +3,7 @@
 import {
   LANES, LANE_W, laneX, PLAYER, GRAVITY, JUMP_H, SUPER_JUMP_H, FAST_FALL_V,
   ROLL_TIME, LANE_SPEED, STEP_UP, JUMP_BUFFER, COYOTE_TIME, POWER_TIME,
-  FLY_Y, MAGNET_RANGE, STUMBLE_TIME, GRACE_TIME, GEN_AHEAD, KEEP_BEHIND, speedAt,
+  FLY_Y, MAGNET_RANGE, STUMBLE_TIME, GRACE_TIME, GEN_AHEAD, KEEP_BEHIND, LEVEL_DIST, MAX_LEVEL, speedAt,
 } from './config.js';
 import { LevelGenerator } from './generator.js';
 import { surfaceHeight, hitBarrier, trainFront } from './physics.js';
@@ -44,6 +44,7 @@ export class Sim {
     this.power = { magnet: 0, multiplier: 0, sneakers: 0, jetpack: 0, board: 0 };
     this.coins = 0;
     this.score = 0;
+    this.lastLevel = 1;
     this.trains = [];
     this.barriers = [];
     this.coinItems = [];
@@ -58,7 +59,10 @@ export class Sim {
   get speed() { return speedAt(this.s); }
   get flying() { return this.power.jetpack > 0; }
   get rolling() { return this.rollT > 0; }
-  get multiplier() { return this.power.multiplier > 0 ? 2 : 1; }
+  get level() { return Math.min(MAX_LEVEL, 1 + Math.floor(this.s / LEVEL_DIST)); }
+  // 0..1 progress towards the next level (1 once the top level is reached)
+  get levelProgress() { return this.level >= MAX_LEVEL ? 1 : (this.s % LEVEL_DIST) / LEVEL_DIST; }
+  get multiplier() { return this.level * (this.power.multiplier > 0 ? 2 : 1); }
   get height() { return this.rollT > 0 ? PLAYER.rollHeight : PLAYER.height; }
 
   // ---- input -------------------------------------------------------------
@@ -163,6 +167,11 @@ export class Sim {
     }
     this.x = nx;
     this.s = ns;
+    const lv = this.level;
+    if (lv > this.lastLevel) {
+      this.lastLevel = lv;
+      this.events.push({ type: 'level', level: lv });
+    }
 
     // --- vertical movement ---
     const ground = this._surface(this.x, this.s);

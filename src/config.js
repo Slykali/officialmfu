@@ -53,5 +53,9 @@ export const MAGNET_RANGE = 9;
 export const STUMBLE_TIME = 5; // guard keeps chasing this long after a stumble
 export const GRACE_TIME = 2; // invulnerability after a board break / jetpack landing
 
+// Every LEVEL_DIST metres the level goes up, and with it the score multiplier.
+export const LEVEL_DIST = 500;
+export const MAX_LEVEL = 10;
+
 export const GEN_AHEAD = 280; // how far ahead the level is generated
 export const KEEP_BEHIND = 20; // how far behind items are kept before removal

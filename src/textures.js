@@ -105,7 +105,7 @@ export const LIVERIES = [
   { base: '#2f6fd6', stripe: '#ffd23f', accent: '#0b2545' },
   { base: '#3aa655', stripe: '#f1faee', accent: '#1b4332' },
   { base: '#ee8a1c', stripe: '#2b2d42', accent: '#5a2a00' },
-  { base: '#b9c3cc', stripe: '#e63946', accent: '#22223b' }, // oncoming
+  { base: '#30343f', stripe: '#ffd60a', accent: '#ef233c' }, // oncoming: dark with hazard stripes
 ];
 
 export function trainSideTexture(livery, seed) {
@@ -170,9 +170,17 @@ export function trainFrontTexture(livery, lit) {
   g.beginPath();
   g.moveTo(40, 40); g.lineTo(110, 40); g.lineTo(60, 110); g.lineTo(40, 110);
   g.fill();
-  // stripe
+  // stripe (hazard chevrons on oncoming trains)
   g.fillStyle = L.stripe;
   g.fillRect(0, 172, 256, 22);
+  if (lit) {
+    g.fillStyle = '#111';
+    for (let x = -22; x < 256; x += 32) {
+      g.beginPath();
+      g.moveTo(x, 194); g.lineTo(x + 14, 194); g.lineTo(x + 36, 172); g.lineTo(x + 22, 172);
+      g.fill();
+    }
+  }
   // headlights
   for (const x of [48, 208]) {
     g.fillStyle = lit ? '#fffbe0' : '#f4e7a1';
@@ -188,7 +196,7 @@ export function trainFrontTexture(livery, lit) {
   g.fillStyle = '#ffd23f';
   g.font = 'bold 22px sans-serif';
   g.textAlign = 'center';
-  g.fillText(lit ? '!!' : '07', 128, 233);
+  g.fillText(lit ? '<<' : '07', 128, 233);
   return tex(c);
 }
 
@@ -239,12 +247,13 @@ export function skyTexture() {
 }
 
 // Round power-up badges.
+export const POWER_COLORS = {
+  magnet: '#ff4d4d', multiplier: '#ffb703', sneakers: '#38d66b', jetpack: '#4dabf7', board: '#c77dff',
+};
+
 export function powerTexture(type) {
   const [c, g] = canvas(128, 128);
-  const colors = {
-    magnet: '#ff4d4d', multiplier: '#ffb703', sneakers: '#38d66b', jetpack: '#4dabf7', board: '#c77dff',
-  };
-  const col = colors[type];
+  const col = POWER_COLORS[type];
   const glow = g.createRadialGradient(64, 64, 30, 64, 64, 64);
   glow.addColorStop(0, col);
   glow.addColorStop(1, 'rgba(255,255,255,0)');
@@ -313,4 +322,32 @@ export function powerTexture(type) {
   }
   g.restore();
   return tex(c);
+}
+
+// Soft round glow for headlights.
+export function glowTexture() {
+  const [c, g] = canvas(64, 64);
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,240,1)');
+  grad.addColorStop(0.25, 'rgba(255,240,170,0.85)');
+  grad.addColorStop(1, 'rgba(255,220,120,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return tex(c);
+}
+
+// Chevrons pointing up the ramp.
+export function chevronTexture() {
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#e8b200';
+  g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#2b2d42';
+  g.beginPath();
+  g.moveTo(64, 18); g.lineTo(116, 70); g.lineTo(116, 100); g.lineTo(64, 48); g.lineTo(12, 100); g.lineTo(12, 70);
+  g.fill();
+  g.fillStyle = 'rgba(0,0,0,0.2)';
+  g.fillRect(0, 0, 6, 128);
+  g.fillRect(122, 0, 6, 128);
+  const t = tex(c, true);
+  return t;
 }

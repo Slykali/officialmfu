@@ -1,6 +1,6 @@
 # Subway Rush 2
 
-A 3D endless runner for the browser: dodge trains, jump barriers, roll under signs, run up ramps onto train roofs, grab coins and power-ups, and keep away from the guard.
+A 3D endless runner for the browser: dodge trains, jump barriers, roll under signs, run up ramps onto train roofs, grab coins and power-up orbs, and keep away from the guard and the guard's dog.
 
 ## Play
 
@@ -13,18 +13,25 @@ Open `index.html` in any modern browser. Double-clicking the file works, and so 
 | Roll (and drop fast when in the air) | `↓` or `S` | swipe down |
 | Pause / resume | `P` or `Esc` | pause button |
 | Mute | `M` | speaker button |
-| Start / restart | `Enter` | PLAY button |
+| Start / restart | `Enter` or `Space` | PLAY button, or tap the menu |
+| Pick a character (Characters screen) | `←` `→`, `Enter` to select or unlock, `Esc` to go back | arrows and buttons |
 
 ### Obstacles
 
 - **Red and white barriers**: jump over them.
 - **Yellow and black signs**: roll under them.
-- **Trains**: change lane, or run up a yellow ramp onto the roof. Trains with bright headlights are coming towards you.
-- Clipping the side of a train makes you **stumble** and the guard starts chasing you. A second stumble while the guard is still close means you're caught.
+- **Trains**: change lane, or run up a chevron ramp onto the roof. Dark trains with glowing headlights, a flashing beacon and a horn are coming towards you.
+- Clipping the side of a train makes you **stumble** and the guard and dog start chasing you. A second stumble while they're still close means you're caught.
 
-### Power-ups
+### Levels
 
-| Power-up | Effect |
+The bar at the top of the screen (at the bottom on phones) fills as you run. Every 500 m you go up a level, to a maximum of 10, and your score multiplier goes up with it. The 2x orb doubles it again.
+
+### Power-up orbs
+
+Glowing orbs float along the track. Run through one to claim its boost:
+
+| Orb | Boost |
 | --- | --- |
 | Coin Magnet | pulls in nearby coins |
 | 2x | doubles your score |
@@ -32,7 +39,11 @@ Open `index.html` in any modern browser. Double-clicking the file works, and so 
 | Jetpack | fly above everything and collect a trail of sky coins |
 | Hoverboard | absorbs one crash |
 
-Your best score and total coins are saved in the browser.
+### Characters
+
+Six runners, each with their own look: Dash (free), Nova, Bolt, Pixel, Blaze and Frost. Unlock them on the **Characters** screen with the coins you collect across runs.
+
+Your best score, coins, unlocked characters and chosen character are saved in the browser.
 
 ## Development
 
@@ -49,6 +60,7 @@ The code lives in `src/`:
 - `physics.js`, `config.js`: shared collision helpers and tuning constants
 - `game.js`: rendering, animation, camera and game states
 - `models.js`, `world.js`, `textures.js`: procedurally built 3D models, scenery and textures
+- `characters.js`: the playable characters, their looks and prices
 - `ui.js`, `input.js`, `audio.js`: HUD and menus, controls, synthesised sound
 
 Commit the rebuilt `game.js` along with any changes to `src/` so the game stays playable straight from the repository.

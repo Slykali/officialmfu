@@ -12,6 +12,9 @@ export class UI {
       bestMenu: $('bestMenu'), bankMenu: $('bankMenu'), toast: $('toast'), flash: $('flash'),
       overScore: $('overScore'), overCoins: $('overCoins'), overBest: $('overBest'),
       overDist: $('overDist'), overCause: $('overCause'), newBest: $('newBest'), mute: $('muteBtn'),
+      charMenu: $('charMenu'), chars: $('chars'), charName: $('charName'), charTag: $('charTag'),
+      charDots: $('charDots'), charAction: $('charAction'), charsBank: $('charsBank'),
+      levelLabel: $('levelLabel'), levelFill: $('levelFill'), levelNext: $('levelNext'),
     };
     const bind = (id, fn) => {
       $(id).addEventListener('click', (e) => {
@@ -27,6 +30,11 @@ export class UI {
     bind('menuBtn', handlers.menu);
     bind('pauseBtn', handlers.pause);
     bind('muteBtn', handlers.mute);
+    bind('charsBtn', handlers.chars);
+    bind('charPrev', () => handlers.charStep(-1));
+    bind('charNext', () => handlers.charStep(1));
+    bind('charAction', handlers.charAction);
+    bind('charBack', handlers.menu);
 
     // power-up icons for the HUD
     this.icons = {};
@@ -38,20 +46,52 @@ export class UI {
       }
     }
     this.powerRows = {};
-    this.last = { score: -1, coins: -1, mult: -1 };
+    this.last = { score: -1, coins: -1, mult: -1, level: -1, fill: -1 };
     this.toastTimer = null;
   }
 
   _only(screen) {
-    for (const k of ['menu', 'pause', 'over']) this.el[k].classList.toggle('hidden', k !== screen);
+    for (const k of ['menu', 'pause', 'over', 'chars']) this.el[k].classList.toggle('hidden', k !== screen);
     this.el.countdown.classList.add('hidden');
   }
 
-  showMenu(best, bank) {
+  showMenu({ best, bank, character }) {
     this._only('menu');
     this.el.hud.classList.add('hidden');
     this.el.bestMenu.textContent = best.toLocaleString();
     this.el.bankMenu.textContent = bank.toLocaleString();
+    this.el.charMenu.textContent = character;
+  }
+
+  showChars(c) {
+    this._only('chars');
+    this.el.hud.classList.add('hidden');
+    this.el.charName.textContent = c.name;
+    this.el.charTag.textContent = c.tagline;
+    this.el.charsBank.textContent = c.bank.toLocaleString();
+    const btn = this.el.charAction;
+    btn.classList.remove('locked', 'selected', 'nudge');
+    if (c.selected) {
+      btn.textContent = 'SELECTED';
+      btn.classList.add('selected');
+    } else if (c.owned) {
+      btn.textContent = 'SELECT';
+    } else {
+      btn.innerHTML = `UNLOCK <span class="coin-icon"></span> ${c.price.toLocaleString()}`;
+      btn.classList.toggle('locked', c.bank < c.price);
+    }
+    btn.setAttribute('aria-label', c.selected ? `${c.name} is selected` : c.owned ? `Select ${c.name}` : `Unlock ${c.name} for ${c.price} coins`);
+    let dots = '';
+    for (let i = 0; i < c.total; i++) dots += `<i class="${i === c.index ? 'on' : ''}"></i>`;
+    this.el.charDots.innerHTML = dots;
+  }
+
+  // shake the unlock button when the player can't afford it
+  nudge() {
+    const b = this.el.charAction;
+    b.classList.remove('nudge');
+    void b.offsetWidth;
+    b.classList.add('nudge');
   }
 
   showHud() {
@@ -86,7 +126,17 @@ export class UI {
     this.el.mute.title = m ? 'Unmute (M)' : 'Mute (M)';
   }
 
-  updateHud(score, coins, mult, powers) {
+  updateHud(score, coins, mult, powers, level, progress, maxLevel) {
+    if (level !== this.last.level) {
+      this.el.levelLabel.textContent = `LV ${level}`;
+      this.el.levelNext.textContent = level >= maxLevel ? 'MAX' : `x${level + 1}`;
+      this.last.level = level;
+    }
+    const fill = Math.round(progress * 1000) / 10;
+    if (fill !== this.last.fill) {
+      this.el.levelFill.style.width = `${fill}%`;
+      this.last.fill = fill;
+    }
     if (score !== this.last.score) {
       this.el.score.textContent = score.toLocaleString();
       this.last.score = score;

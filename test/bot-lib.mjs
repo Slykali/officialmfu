@@ -117,8 +117,13 @@ export function cloneSim(sim, opt = {}) {
 }
 
 // Fast clone of a clone (items already windowed and owned by the clone tree).
+// events/added/removed are one shared scratch array: every user of a clone
+// drains them right after each step(), and clones are never stepped
+// concurrently, so sharing saves three allocations per clone.
+const SCRATCH = [];
 export function cloneClone(src) {
   const c = shapeClone(src, Object.getPrototypeOf(src));
+  c.events = SCRATCH; c.added = SCRATCH; c.removed = SCRATCH;
   c.trains = src.trains.slice(); // Sim never writes to train objects (checked by itemFingerprint)
   c.powers = src.powers.slice(); // Sim never writes to power objects
   c.barriers = mayGet(src, 'board') ? src.barriers.map(copyItem) : src.barriers.slice();
@@ -147,19 +152,49 @@ export function itemFingerprint(sim) {
 // State keys (for deduplicating search nodes). s is a pure function of time
 // (speed depends only on s), so every node at the same search depth has the
 // same s and the key does not need it.
+//
+// The key is split into an exact 47-bit "fast" number (position, velocity,
+// roll/jump/coyote timers) and a 32-bit hash of the slowly varying timers
+// (grace, stumble, power-ups); see search() for how both are used.
+// NOTE: if Sim grows new state that affects physics, add it here.
+let KEY_SLOW = 0;
+const clampI = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+function mixSlow(h, v) { h = Math.imul(h ^ v, 0x85ebca6b); return (h ^ (h >>> 13)) | 0; }
+
 export function stateKey(c, fine) {
-  const q = fine ? 1000 : 1;
   const p = c.power;
-  let pk = '';
-  for (const k in p) pk += p[k] > 0 ? Math.round(p[k] * (fine ? 60 : 10)) + ',' : '0,';
+  let h = 0x2545f491;
   if (fine) {
-    return `${c.lane}|${Math.round(c.x * 100)}|${Math.round(c.y * 100)}|${Math.round(c.vy * 10)}|${Math.round(c.rollT * 60)}|` +
-      `${c.rollQueued ? 1 : 0}|${Math.round(c.jumpBuf * 60)}|${Math.round(c.coyote * 60)}|${c.grounded ? 1 : 0}|` +
-      `${Math.round(c.graceT * 60)}|${Math.round(c.stumbleT * 60)}|${Math.round(c.stumbleCool * 60)}|${pk}|${c.powers.length}`;
+    for (const k in p) h = mixSlow(h, Math.round(p[k] * 60));
+    h = mixSlow(h, Math.round(c.graceT * 60));
+    h = mixSlow(h, Math.round(c.stumbleT * 60));
+    h = mixSlow(h, Math.round(c.stumbleCool * 60));
+    h = mixSlow(h, c.powers.length);
+    KEY_SLOW = h;
+    let k = c.lane;
+    k = k * 1024 + clampI(Math.round(c.x * 100) + 320, 0, 1023);
+    k = k * 1024 + clampI(Math.round(c.y * 100), 0, 1023);
+    k = k * 1024 + clampI(Math.round(c.vy * 10) + 512, 0, 1023);
+    k = k * 64 + clampI(Math.round(c.rollT * 60), 0, 63);
+    k = k * 2 + (c.rollQueued ? 1 : 0);
+    k = k * 16 + clampI(Math.round(c.jumpBuf * 60), 0, 15);
+    k = k * 8 + clampI(Math.round(c.coyote * 60), 0, 7);
+    return k * 2 + (c.grounded ? 1 : 0);
   }
-  return `${c.lane}|${Math.round(c.x * 5)}|${Math.round(c.y * 4)}|${Math.round(c.vy / 2)}|${Math.ceil(c.rollT * 15)}|` +
-    `${c.rollQueued ? 1 : 0}|${Math.ceil(c.jumpBuf * 30)}|${c.coyote > 0 ? 1 : 0}|${c.grounded ? 1 : 0}|` +
-    `${Math.ceil(c.graceT * 4)}|${c.stumbleT > 0 ? 1 : 0}|${pk}|${c.powers.length}`;
+  for (const k in p) h = mixSlow(h, Math.round(p[k] * 10));
+  h = mixSlow(h, Math.ceil(c.graceT * 4));
+  h = mixSlow(h, c.stumbleT > 0 ? 1 : 0);
+  h = mixSlow(h, c.powers.length);
+  KEY_SLOW = h;
+  let k = c.lane;
+  k = k * 64 + clampI(Math.round(c.x * 5) + 16, 0, 63);
+  k = k * 64 + clampI(Math.round(c.y * 4), 0, 63);
+  k = k * 128 + clampI(Math.round(c.vy / 2) + 32, 0, 127);
+  k = k * 16 + clampI(Math.ceil(c.rollT * 15), 0, 15);
+  k = k * 2 + (c.rollQueued ? 1 : 0);
+  k = k * 8 + clampI(Math.ceil(c.jumpBuf * 30), 0, 7);
+  k = k * 2 + (c.coyote > 0 ? 1 : 0);
+  return k * 2 + (c.grounded ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +264,7 @@ export function search(root, opt) {
     const decide = f % every === 0;
     const acts = decide ? actions : [A_NONE];
     const map = new Map();
+    const alt = new Map(); // same fast key, different slow timers (rare)
     for (let ni = 0; ni < frontier.length; ni++) {
       const node = frontier[ni];
       const ns = node.sim;
@@ -249,6 +285,7 @@ export function search(root, opt) {
         let bad = false;
         const ev = c.events;
         for (let i = 0; i < ev.length; i++) {
+          if (ev[i].kind !== undefined) continue; // an item pushed to the shared added/removed scratch
           const t = ev[i].type;
           if (t === 'stumble') { if (!allowStumble) bad = true; inc += 1; }
           else if (t === 'boardBreak') { if (!allowBoard) bad = true; inc += 1; }
@@ -260,15 +297,19 @@ export function search(root, opt) {
         let v = node.v + (a !== A_NONE ? -0.002 : 0) + coinW * (c.coins - coinsBefore) + powerW * (pk - node.pk) - 50 * (inc - node.inc);
         if (reward) v += reward(c);
         const key = stateKey(c, fine);
-        const prev = map.get(key);
+        const slow = KEY_SLOW;
+        let prev = map.get(key);
+        let useAlt = false;
+        if (prev && prev.slow !== slow) { useAlt = true; prev = alt.get(key + ':' + slow); }
         if (prev && prev.v >= v) continue;
-        const nn = { sim: c, path: { a, prev: node.path }, v, inc, pk };
-        map.set(key, nn);
+        const nn = { sim: c, path: { a, prev: node.path }, v, inc, pk, slow };
+        if (useAlt) alt.set(key + ':' + slow, nn); else map.set(key, nn);
         if (goal && goal(c, nn)) return finish(nn, f + 1, true);
       }
     }
-    if (!map.size) break;
+    if (!map.size && !alt.size) break;
     let next = Array.from(map.values());
+    if (alt.size) for (const n of alt.values()) next.push(n);
     if (next.length > peak) peak = next.length;
     if (next.length > beam) {
       next.sort((p, q) => q.v - p.v);
@@ -432,6 +473,7 @@ function badEvents(c, powers) {
   const ev = c.events;
   let bad = false;
   for (let i = 0; i < ev.length; i++) {
+    if (ev[i].kind !== undefined) continue;
     const t = ev[i].type;
     if (t === 'stumble' || t === 'boardBreak') bad = true;
     else if (t === 'power' && powers === 'avoid') bad = true;
@@ -478,6 +520,7 @@ export function judge(cp, seed, untilFrame, opt = {}) {
   const H = untilFrame - cp.frame;
   const until = cp.s + (H / 60) * 33 + 80;
   const root = rootFromCheckpoint(cp, seed, until);
+  root.coinItems = []; // coins cannot affect survival
   const t0 = Date.now();
   const beam = opt.beam || 20000;
   // Stage A finds an escape quickly when there is an easy one; stage B is the
@@ -502,6 +545,116 @@ export function judge(cp, seed, untilFrame, opt = {}) {
   const last = stages[st];
   return { ok: r.ok, stage: st, depth: r.depth, horizon: H, fromFrame: cp.frame, fromS: cp.s, peak: r.peak,
     beam: last.beam, truncated: r.peak > last.beam, expanded, ms: Date.now() - t0, plan: r.plan, endS: r.end ? r.end.s : null };
+}
+
+// ---------------------------------------------------------------------------
+// Static scan of the generator (no simulation): checks the documented
+// safe-lane invariant and item placement directly on the generated level.
+// Cheap enough for thousands of seeds.
+export function staticScan(seed, until) {
+  const g = new LevelGenerator(seed);
+  const rows = [];
+  const proto = Object.getPrototypeOf(g);
+  g._row = function (s, out) {
+    const prev = this.safe;
+    const sPrev = this.prevRow;
+    proto._row.call(this, s, out);
+    rows.push({ s, sPrev, safe: this.safe, prevSafe: prev });
+  };
+  const items = g.generate(until);
+  const lanes = [[], [], []];
+  const trains = [[], [], []];
+  for (const it of items) {
+    lanes[it.lane].push(it);
+    if (it.kind === 'train') trains[it.lane].push(it);
+  }
+  const issues = [];
+  const add = (type, info) => issues.push({ type, seed, ...info });
+  const K = MOVING.k;
+  // 1. safe lane segments
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const L = r.safe;
+    if (Math.abs(L - r.prevSafe) > 1) add('safe-jump-two-lanes', { row: r.s, from: r.prevSafe, to: L });
+    for (const t of trains[L]) {
+      if (t.moving) {
+        // a moving train hits a player in its lane for player positions in [t.s, t.s + len/(1+k)]
+        const h0 = t.s - 0.5, h1 = t.s + t.len / (1 + K) + 0.5;
+        if (h0 < r.s && h1 > r.sPrev) add('moving-train-in-safe-lane', { row: r.s, sPrev: r.sPrev, lane: L, train: t.id, hazard: [h0, h1] });
+      } else if (!t.ramp) {
+        if (t.s < r.s && t.s + t.len > r.sPrev) add('plain-train-in-safe-lane', { row: r.s, sPrev: r.sPrev, lane: L, train: t.id, span: [t.s, t.s + t.len] });
+      }
+    }
+    // when the safe lane shifts, the player still runs in the old lane right
+    // after sPrev: the old lane must not have a plain wall in (sPrev, sPrev + 0.5*gap]
+    if (L !== r.prevSafe) {
+      const gap = r.s - r.sPrev;
+      for (const t of trains[r.prevSafe]) {
+        if (t.moving || t.ramp) continue;
+        if (t.s > r.sPrev && t.s < r.sPrev + 0.5 * gap) add('old-safe-lane-blocked-early', { row: r.s, lane: r.prevSafe, train: t.id, at: t.s });
+      }
+    }
+  }
+  // 2. item placement within a lane
+  for (let L = 0; L < 3; L++) {
+    const ts = trains[L];
+    for (let a = 0; a < ts.length; a++) {
+      for (let b = a + 1; b < ts.length; b++) {
+        const A = ts[a], B = ts[b];
+        if (A.moving || B.moving) continue;
+        const a0 = A.s - (A.ramp ? RAMP_L : 0), a1 = A.s + A.len, b0 = B.s - (B.ramp ? RAMP_L : 0), b1 = B.s + B.len;
+        if (a0 < b1 && b0 < a1) add('trains-overlap', { lane: L, a: A.id, b: B.id });
+      }
+    }
+    for (const it of lanes[L]) {
+      if (it.kind === 'train') continue;
+      for (const t of ts) {
+        if (t.moving) {
+          // parked footprint and the meeting point
+          if (it.s > t.s - 1 && it.s < t.s + K * MOVING.R + t.len + 1 && it.kind !== 'coin') add('item-in-moving-train-path', { lane: L, item: it.id, kind: it.kind, s: it.s, train: t.id });
+          continue;
+        }
+        let top = -1;
+        if (it.s > t.s && it.s < t.s + t.len) top = TRAIN.height;
+        else if (t.ramp && it.s > t.s - RAMP_L && it.s <= t.s) top = ((it.s - (t.s - RAMP_L)) / RAMP_L) * TRAIN.height;
+        if (top < 0) continue;
+        if (it.kind === 'hurdle' || it.kind === 'overhead') add('barrier-inside-train', { lane: L, item: it.id, kind: it.kind, s: it.s, train: t.id });
+        else if (it.y < top) add(`${it.kind}-inside-train`, { lane: L, item: it.id, s: it.s, y: it.y, top, train: t.id });
+      }
+      if (it.kind === 'coin') {
+        // ground-level coin right after a roof end: a runner leaving the roof
+        // is still ~3.6 up there and cannot reach it
+        for (const t of ts) {
+          if (t.moving) continue;
+          const e = t.s + t.len;
+          if (it.s >= e && it.s < e + 2.0 && it.y < 2.0) add('coin-just-below-roof-end', { lane: L, item: it.id, s: +it.s.toFixed(2), y: it.y, after: +(it.s - e).toFixed(2), train: t.id });
+        }
+      }
+      if (it.kind === 'coin' || it.kind === 'power') {
+        for (const b of lanes[L]) {
+          if (b.kind !== 'hurdle' && b.kind !== 'overhead') continue;
+          const spec = b.kind === 'hurdle' ? HURDLE : OVERHEAD;
+          if (Math.abs(it.s - b.s) < spec.halfD + 0.3 && it.y > spec.y0 - 0.3 && it.y < spec.y1 + 0.3) add(`${it.kind}-touches-${b.kind}`, { lane: L, item: it.id, s: it.s, y: it.y, barrier: b.id });
+        }
+      }
+    }
+  }
+  // 3. coin ids / NaN
+  const ids = new Set();
+  for (const it of items) {
+    if (ids.has(it.id)) add('duplicate-id', { id: it.id });
+    ids.add(it.id);
+    for (const k of ['s', 'y', 'len']) if (it[k] !== undefined && !Number.isFinite(it[k])) add('nan', { id: it.id, field: k });
+  }
+  // duplicated coins (same lane & position)
+  const coinKey = new Set();
+  for (const it of items) {
+    if (it.kind !== 'coin') continue;
+    const k = `${it.lane}|${Math.round(it.s * 10)}`;
+    if (coinKey.has(k)) add('duplicate-coin', { lane: it.lane, s: it.s, id: it.id });
+    coinKey.add(k);
+  }
+  return { rows: rows.length, items: items.length, issues, moving: items.filter((i) => i.moving).length };
 }
 
 // ---------------------------------------------------------------------------
